@@ -1,0 +1,87 @@
+import json
+import os
+import uuid
+from datetime import datetime
+from agents.document_access.minio import MinioHandler
+
+METADATA_FILE = "data/documents_metadata.json"
+
+class MetadataManager:
+    def __init__(self):
+        self.minio = MinioHandler()
+        self.db_path = METADATA_FILE
+        self._ensure_db()
+
+    def _ensure_db(self):
+        if not os.path.exists(self.db_path):
+            with open(self.db_path, "w") as f:
+                json.dump([], f)
+
+    def load_metadata(self):
+        try:
+            with open(self.db_path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    def save_metadata(self, data):
+        with open(self.db_path, "w") as f:
+            json.dump(data, f, indent=4)
+
+    def sync_with_minio(self):
+        """
+        Syncs local metadata DB with actual files in MinIO.
+        Adds new files, marks missing ones? (Optional: keep history)
+        """
+        minio_files = self.minio.list_documents()
+        current_data = self.load_metadata()
+        current_filenames = {item["filename"]: item for item in current_data}
+        
+        updated_data = []
+        
+        # 1. Update/Add existing files
+        for f in minio_files:
+            fname = f["filename"]
+            if fname in current_filenames:
+                # Update existing (keep ID and manual edits)
+                entry = current_filenames[fname]
+                entry["size"] = f["size"]
+                entry["last_modified_minio"] = f["last_modified"]
+                updated_data.append(entry)
+            else:
+                # Add new
+                new_entry = {
+                    "id": str(uuid.uuid4()),
+                    "filename": fname,
+                    "country": "Unknown", # Default
+                    "doc_type": "Regulation", # Default
+                    "visibility": "visible",
+                    "status": "pending", # pending, processing, processed, error
+                    "size": f["size"],
+                    "last_modified_minio": f["last_modified"],
+                    "added_at": datetime.now().isoformat()
+                }
+                updated_data.append(new_entry)
+        
+        # 2. (Optional) Handle deleted files? 
+        # For now, let's keep them but maybe mark as 'deleted_in_source' if we wanted strictly sync.
+        # But to match the list, we only replace with what's in MinIO + persisted metadata.
+        # If a file is removed from MinIO, it won't be in `minio_files`, so it won't be in `updated_data`.
+        # This implies "hard sync".
+        
+        self.save_metadata(updated_data)
+        return updated_data
+
+    def update_document(self, doc_id, updates: dict):
+        data = self.load_metadata()
+        for item in data:
+            if item["id"] == doc_id:
+                item.update(updates)
+                item["last_updated"] = datetime.now().isoformat()
+                self.save_metadata(data)
+                return True
+        return False
+
+    def get_pending_documents(self):
+        data = self.load_metadata()
+        return [d for d in data if d["status"] == "pending"]

@@ -1,0 +1,19 @@
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  bucket_name: "regulations"
+  secure: false
+
+neo4j:
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: "password"
+
+models:
+  hf_token: "" # Set via env var HF_TOKEN usually
+  model_id: "LiquidAI/LFM2-2.6B-Exp"
+
+processing:
+  chunk_size: 800
+  chunk_overlap: 150
