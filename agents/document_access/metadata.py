@@ -40,10 +40,11 @@ class MetadataManager:
         """
         minio_files = self.minio.list_documents()
         current_data = self.load_metadata()
-        # If MinIO listing failed (None), keep existing metadata instead of overwriting it.
+        # If MinIO listing failed (None), raise an error instead of silently returning existing data
         if minio_files is None:
-            print("MinIO listing failed; keeping existing metadata.")
-            return current_data
+            error_msg = "Failed to connect to MinIO or list documents. Please check MinIO connection settings and ensure the service is running."
+            print(error_msg)
+            raise Exception(error_msg)
         current_filenames = {item["filename"]: item for item in current_data}
         
         updated_data = []
