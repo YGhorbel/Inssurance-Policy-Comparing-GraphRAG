@@ -80,9 +80,9 @@ class MinioHandler:
                 })
             return docs
         except Exception as e:
-            # Print error and return None so callers can keep existing metadata instead of
-            # overwriting it with an empty list on transient failures.
+            # Print error and return None so callers can handle appropriately
             print(f"MinIO list_documents error: {e}")
+            print(f"MinIO endpoint: {self.endpoint}, bucket: {self.bucket_name}")
             return None
 
     def download_document(self, object_name, local_path):

@@ -5,6 +5,7 @@ from datetime import datetime
 from agents.document_access.minio import MinioHandler
 
 METADATA_FILE = "data/documents_metadata.json"
+MINIO_CONNECTION_ERROR = "Failed to connect to MinIO or list documents. Please check MinIO connection settings and ensure the service is running."
 
 class MetadataManager:
     def __init__(self):
@@ -40,10 +41,10 @@ class MetadataManager:
         """
         minio_files = self.minio.list_documents()
         current_data = self.load_metadata()
-        # If MinIO listing failed (None), keep existing metadata instead of overwriting it.
+        # If MinIO listing failed (None), raise an error instead of silently returning existing data
         if minio_files is None:
-            print("MinIO listing failed; keeping existing metadata.")
-            return current_data
+            print(MINIO_CONNECTION_ERROR)
+            raise Exception(MINIO_CONNECTION_ERROR)
         current_filenames = {item["filename"]: item for item in current_data}
         
         updated_data = []
