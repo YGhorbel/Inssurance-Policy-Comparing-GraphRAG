@@ -61,8 +61,10 @@ class MetadataManager:
                 # Add new
                 # Auto-detect country from folder path
                 country = "Unknown"
-                if "/" in fname:
-                    folder = fname.split("/")[0].lower()
+                dirname = os.path.dirname(fname)
+                if dirname:
+                    # Get the top-level folder name
+                    folder = dirname.split('/')[0].lower()
                     if folder == "tunisia":
                         country = "Tunisia"
                     elif folder == "france":
