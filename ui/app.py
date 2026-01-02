@@ -69,9 +69,19 @@ with tab2:
         if st.button("🔄 Sync Metadata"):
             try:
                 payload = {"jsonrpc": "2.0", "method": "sync_metadata", "id": "sync"}
-                requests.post(API_URL, json=payload)
-                st.success("Synced!")
-                st.rerun()
+                res = requests.post(API_URL, json=payload)
+                data = res.json()
+                
+                if "error" in data:
+                    st.error(f"Sync Failed: {data['error'].get('message', 'Unknown error')}")
+                else:
+                    result = data.get("result", [])
+                    # Ensure result is a list for len() operation
+                    if isinstance(result, list):
+                        st.success(f"Synced! Found {len(result)} document(s).")
+                    else:
+                        st.success("Synced!")
+                    st.rerun()
             except Exception as e:
                 st.error(f"Sync Failed: {e}")
 
@@ -81,9 +91,13 @@ with tab2:
                 try:
                     payload = {"jsonrpc": "2.0", "method": "ingest_documents", "id": "ingest"}
                     res = requests.post(API_URL, json=payload).json()
-                    st.success(res.get("result", {}).get("status", "Done"))
-                    st.write(res.get("result", {}).get("details", []))
-                    st.rerun()
+                    
+                    if "error" in res:
+                        st.error(f"Ingestion Failed: {res['error'].get('message', 'Unknown error')}")
+                    else:
+                        st.success(res.get("result", {}).get("status", "Done"))
+                        st.write(res.get("result", {}).get("details", []))
+                        st.rerun()
                 except Exception as e:
                     st.error(f"Ingestion Failed: {e}")
 
