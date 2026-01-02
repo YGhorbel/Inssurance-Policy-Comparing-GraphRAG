@@ -76,7 +76,11 @@ with tab2:
                     st.error(f"Sync Failed: {data['error'].get('message', 'Unknown error')}")
                 else:
                     result = data.get("result", [])
-                    st.success(f"Synced! Found {len(result)} document(s).")
+                    # Ensure result is a list for len() operation
+                    if isinstance(result, list):
+                        st.success(f"Synced! Found {len(result)} document(s).")
+                    else:
+                        st.success("Synced!")
                     st.rerun()
             except Exception as e:
                 st.error(f"Sync Failed: {e}")
