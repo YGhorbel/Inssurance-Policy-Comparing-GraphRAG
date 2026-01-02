@@ -84,6 +84,79 @@ Example graph schema:
 
 (Adjust commands/entrypoints to match your local structure.)
 
+## Run locally (Windows — recommended quick steps)
+
+These commands assume you're on Windows PowerShell and in the project root (where `docker-compose.yml` and `requirements.txt` live).
+
+- Prerequisites:
+   - Docker Desktop (with WSL2 backend recommended)
+   - Python 3.10+ and `venv`
+
+- Start infrastructure (MinIO, Qdrant, Neo4j, etc.)
+
+```powershell
+docker-compose up -d
+```
+
+- Create a Python virtual environment and install dependencies
+
+```powershell
+python -m venv .venv
+. .venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+- Configure environment variables (example `.env` / PowerShell export)
+
+Create a `.env` file or export these vars in your environment. Example `.env` entries:
+
+```text
+HF_TOKEN=your_hf_token_here
+QDRANT_URL=http://localhost:6333
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=password
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+```
+
+- Start the FastAPI server (backend / MCP endpoint)
+
+```powershell
+uvicorn api.server:app --reload --host 0.0.0.0 --port 8000
+```
+
+- Ingest documents (via MCP JSON-RPC) — example: trigger planner ingestion
+
+```powershell
+curl -X POST http://localhost:8000/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"ingest_documents","id":"1"}'
+```
+
+- Ingest Qdrant → Neo4j (GraphRAG) via API
+
+```powershell
+curl -X POST http://localhost:8000/graph/ingest
+```
+
+- Run the Streamlit UI
+
+```powershell
+streamlit run ui/app.py
+```
+
+- Example retrieval fusion (compare/analysis) via API
+
+```powershell
+curl -X POST http://localhost:8000/graph/retrieve -H "Content-Type: application/json" -d '{"query":"compare auto insurance Tunisia France","top_k":5}'
+```
+
+Notes
+- If `chonkie` or large model dependencies are not installed, some functionality will fall back or raise errors — install optional packages listed in `requirements.txt` as needed.
+- If Qdrant client methods differ by version, the pipeline includes fallbacks but test the flow and adapt if needed.
+- For production, secure `.env` values and consider using Docker secrets / a proper configuration store.
+
 ## Usage examples
 - "Compare auto insurance requirements in France and Tunisia"
 - "Find expiration clauses for health policies in Tunisia"

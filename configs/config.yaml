@@ -17,3 +17,6 @@ models:
 processing:
   chunk_size: 800
   chunk_overlap: 150
+qdrant:
+  url: "http://localhost:6333"
+  collection: "regulations_chunks"

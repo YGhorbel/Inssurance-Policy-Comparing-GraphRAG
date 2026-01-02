@@ -1,6 +1,8 @@
 from core.mcp.handler import mcp_registry
 from core.llm.client import get_llm_client
 import json
+from . import document_analyzer
+from .pipeline import AnalyzerPipeline
 
 llm = get_llm_client()
 
@@ -47,3 +49,14 @@ async def analyze_query(query: str) -> dict:
 
 mcp_registry.register_tool("analyze_query", analyze_query)
 print("Analyzer Agent initialized.")
+
+# Register processing tools
+pipeline = AnalyzerPipeline()
+
+
+async def process_new_documents():
+  return pipeline.process_new_files()
+
+
+mcp_registry.register_tool("analyzer.process_new_files", process_new_documents)
+print("Analyzer pipeline registered.")
