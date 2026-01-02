@@ -59,10 +59,21 @@ class MetadataManager:
                 updated_data.append(entry)
             else:
                 # Add new
+                # Auto-detect country from folder path
+                country = "Unknown"
+                if "/" in fname:
+                    folder = fname.split("/")[0].lower()
+                    if folder == "tunisia":
+                        country = "Tunisia"
+                    elif folder == "france":
+                        country = "France"
+                    elif folder == "europe":
+                        country = "Europe"
+                
                 new_entry = {
                     "id": str(uuid.uuid4()),
                     "filename": fname,
-                    "country": "Unknown", # Default
+                    "country": country,
                     "doc_type": "Regulation", # Default
                     "visibility": "visible",
                     "status": "pending", # pending, processing, processed, error
