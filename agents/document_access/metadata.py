@@ -13,6 +13,11 @@ class MetadataManager:
         self._ensure_db()
 
     def _ensure_db(self):
+        # Ensure the directory exists
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+        # Create the file if it doesn't exist
         if not os.path.exists(self.db_path):
             with open(self.db_path, "w") as f:
                 json.dump([], f)
