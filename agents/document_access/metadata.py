@@ -13,6 +13,11 @@ class MetadataManager:
         self._ensure_db()
 
     def _ensure_db(self):
+        # Ensure the directory exists
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+        # Create the file if it doesn't exist
         if not os.path.exists(self.db_path):
             with open(self.db_path, "w") as f:
                 json.dump([], f)
@@ -54,10 +59,23 @@ class MetadataManager:
                 updated_data.append(entry)
             else:
                 # Add new
+                # Auto-detect country from folder path
+                country = "Unknown"
+                dirname = os.path.dirname(fname)
+                if dirname:
+                    # Get the top-level folder name
+                    folder = dirname.split('/')[0].lower()
+                    if folder == "tunisia":
+                        country = "Tunisia"
+                    elif folder == "france":
+                        country = "France"
+                    elif folder == "europe":
+                        country = "Europe"
+                
                 new_entry = {
                     "id": str(uuid.uuid4()),
                     "filename": fname,
-                    "country": "Unknown", # Default
+                    "country": country,
                     "doc_type": "Regulation", # Default
                     "visibility": "visible",
                     "status": "pending", # pending, processing, processed, error
