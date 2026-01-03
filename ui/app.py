@@ -88,8 +88,8 @@ with tab1:
                                     
                                     entities = analysis.get("entities", {})
                                     region = entities.get("region", [])
-                                    if region and isinstance(region, list):
-                                        st.write("**Regions:**", ", ".join(region))
+                                    if isinstance(region, list) and region:
+                                        st.write("**Regions:**", ", ".join(str(r) for r in region))
                                     if entities.get("topic"):
                                         st.write("**Topic:**", entities.get("topic", "N/A"))
                             
@@ -171,8 +171,13 @@ with tab2:
         with col3:
             st.metric("Pending", len(pending_docs))
         with col4:
-            total_chunks = sum(d.get("chunks_count", 0) for d in processed_docs)
-            st.metric("Total Enriched Chunks", total_chunks)
+            # Safely sum chunks_count, handling non-numeric values
+            total_chunks = sum(
+                d.get("chunks_count", 0) 
+                for d in processed_docs 
+                if isinstance(d.get("chunks_count"), (int, float))
+            )
+            st.metric("Total Enriched Chunks", int(total_chunks))
         
         st.divider()
 
@@ -183,12 +188,17 @@ with tab2:
             status = doc['status']
             status_emoji = STATUS_EMOJIS.get(status, "❓")
             chunks_count = doc.get('chunks_count')
-            chunks_info = f" - {chunks_count} chunks" if chunks_count is not None and chunks_count > 0 else ""
+            
+            # Safely display chunk count (handle None and non-numeric values)
+            if isinstance(chunks_count, (int, float)) and chunks_count > 0:
+                chunks_info = f" - {int(chunks_count)} chunks"
+            else:
+                chunks_info = ""
             
             with st.expander(f"{status_emoji} {doc['filename']} ({doc['country']}){chunks_info}"):
                 # Show enrichment info for processed documents
-                if status == "processed" and chunks_count is not None and chunks_count > 0:
-                    st.info(f"📚 Document enriched with {chunks_count} chunks containing summaries, keywords, questions, and requirements")
+                if status == "processed" and isinstance(chunks_count, (int, float)) and chunks_count > 0:
+                    st.info(f"📚 Document enriched with {int(chunks_count)} chunks containing summaries, keywords, questions, and requirements")
                 
                 c1, c2, c3 = st.columns(3)
                 new_country = c1.selectbox("Country", ["Tunisia", "Europe", "France", "Unknown"], index=["Tunisia", "Europe", "France", "Unknown"].index(doc.get("country", "Unknown")), key=f"c_{doc['id']}")
