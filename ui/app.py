@@ -14,6 +14,10 @@ STATUS_EMOJIS = {
     "error": "❌"
 }
 
+# Document metadata options
+COUNTRY_OPTIONS = ["Tunisia", "Europe", "France", "Unknown"]
+DOC_TYPE_OPTIONS = ["Regulation", "Law", "Guideline"]
+
 st.title("🤖 Legal & Regulatory Multi-Agent Assistant")
 st.markdown("*Architecture: LiquidAI LFM2-2.6B + Qdrant + Neo4j + MinIO (Orchestrated via MCP)*")
 
@@ -185,7 +189,7 @@ with tab2:
         # Edit Mode
         for doc in metadata:
             # Enhanced document title with status badge and chunk count
-            status = doc['status']
+            status = doc.get('status', 'unknown')
             status_emoji = STATUS_EMOJIS.get(status, "❓")
             chunks_count = doc.get('chunks_count')
             
@@ -201,8 +205,23 @@ with tab2:
                     st.info(f"📚 Document enriched with {int(chunks_count)} chunks containing summaries, keywords, questions, and requirements")
                 
                 c1, c2, c3 = st.columns(3)
-                new_country = c1.selectbox("Country", ["Tunisia", "Europe", "France", "Unknown"], index=["Tunisia", "Europe", "France", "Unknown"].index(doc.get("country", "Unknown")), key=f"c_{doc['id']}")
-                new_type = c2.selectbox("Type", ["Regulation", "Law", "Guideline"], index=["Regulation", "Law", "Guideline"].index(doc.get("doc_type", "Regulation")), key=f"t_{doc['id']}")
+                
+                # Safely get index for country selectbox
+                current_country = doc.get("country", "Unknown")
+                try:
+                    country_index = COUNTRY_OPTIONS.index(current_country)
+                except ValueError:
+                    country_index = COUNTRY_OPTIONS.index("Unknown")
+                
+                # Safely get index for doc_type selectbox
+                current_type = doc.get("doc_type", "Regulation")
+                try:
+                    type_index = DOC_TYPE_OPTIONS.index(current_type)
+                except ValueError:
+                    type_index = DOC_TYPE_OPTIONS.index("Regulation")
+                
+                new_country = c1.selectbox("Country", COUNTRY_OPTIONS, index=country_index, key=f"c_{doc['id']}")
+                new_type = c2.selectbox("Type", DOC_TYPE_OPTIONS, index=type_index, key=f"t_{doc['id']}")
                 
                 if st.button("Save Changes", key=f"save_{doc['id']}"):
                     updates = {"country": new_country, "doc_type": new_type}
