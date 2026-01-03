@@ -80,12 +80,88 @@ class AnalyzerPipeline:
         prompt = f"Summarize the following insurance regulation text in a concise paragraph:\n\n{text}"
         return self.llm.generate(prompt)
 
-    def _extract_requirements(self, text: str) -> str:
+    def _extract_keywords(self, text: str) -> list:
+        prompt = (
+            "Extract 5-10 key insurance terms and concepts from the following text. "
+            "Return ONLY a JSON array of keyword strings.\n\n" + text
+        )
+        result = self.llm.generate(prompt)
+        try:
+            import json
+            import re
+            # Try to extract JSON array from response
+            match = re.search(r'\[.*\]', result, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+        except Exception:
+            pass
+        # Fallback: split by commas if not valid JSON
+        return [k.strip() for k in result.split(',') if k.strip()][:10]
+
+    def _generate_questions(self, text: str) -> list:
+        prompt = (
+            "Generate 3-5 hypothetical questions that the following insurance regulation text could answer. "
+            "Return ONLY a JSON array of question strings.\n\n" + text
+        )
+        result = self.llm.generate(prompt)
+        try:
+            import json
+            import re
+            # Try to extract JSON array from response
+            match = re.search(r'\[.*\]', result, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+        except Exception:
+            pass
+        # Fallback: split by newlines
+        return [q.strip() for q in result.split('\n') if q.strip() and '?' in q][:5]
+
+    def _extract_requirements(self, text: str) -> list:
         prompt = (
             "Extract any explicit requirements, obligations, or normative statements from the following text. "
             "Return as a JSON array of requirement strings.\n\n" + text
         )
-        return self.llm.generate(prompt)
+        result = self.llm.generate(prompt)
+        try:
+            import json
+            import re
+            # Try to extract JSON array from response
+            match = re.search(r'\[.*\]', result, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+        except Exception:
+            pass
+        # Fallback: return as single-item list
+        return [result] if result else []
+
+    def _classify_metadata(self, text: str, existing_metadata: dict) -> dict:
+        """Extract or infer policy_type and clause_type from text and metadata."""
+        # Use LLM to classify if not already in metadata
+        prompt = (
+            "Analyze the following insurance text and classify it:\n"
+            "1. Policy Type: Auto, Health, Life, Property, or General\n"
+            "2. Clause Type: Requirement, Coverage, Exclusion, Procedure, or Definition\n\n"
+            "Text: " + text[:500] + "\n\n"
+            "Return ONLY a JSON object with 'policy_type' and 'clause_type' keys."
+        )
+        result = self.llm.generate(prompt)
+        
+        classification = {
+            "policy_type": existing_metadata.get("policy_type", "General"),
+            "clause_type": "Requirement"  # Default
+        }
+        
+        try:
+            import json
+            import re
+            match = re.search(r'\{.*\}', result, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group(0))
+                classification.update(parsed)
+        except Exception:
+            pass
+        
+        return classification
 
     def _embed(self, text: str):
         vec = self.embedder.encode(text)
@@ -111,30 +187,58 @@ class AnalyzerPipeline:
         # Chunk
         chunks = self.chunker.chunk_documents(docs)
 
-        points = []
-        for c in chunks:
+        enriched_chunks = []
+        for idx, c in enumerate(chunks):
             text = c.page_content
             metadata = c.metadata
 
+            # Enrich chunk with all required fields
             summary = self._summarize(text)
+            keywords = self._extract_keywords(text)
+            questions = self._generate_questions(text)
             requirements = self._extract_requirements(text)
+            
+            # Classify policy and clause type
+            classification = self._classify_metadata(text, metadata)
+            
+            # Generate embedding
             embedding = self._embed(text)
 
+            # Create unique chunk ID
             chunk_id = self._make_id(metadata, text)
 
-            payload = {
+            # Build enriched chunk structure matching the spec
+            enriched_chunk = {
+                "chunk_id": chunk_id,
+                "text": text,
                 "summary": summary,
-                "original_text": text,
-                "requirements": requirements,
-                "metadata": metadata,
+                "keywords": keywords,
+                "questions": questions,
+                "country": metadata.get("country", "Unknown"),
+                "policy_type": classification.get("policy_type", "General"),
+                "clause_type": classification.get("clause_type", "Requirement"),
+                "extracted_requirements": requirements,
+                "source": {
+                    "document": metadata.get("filename", object_name),
+                    "page": metadata.get("page", 0),
+                    "section": metadata.get("section", "")
+                },
+                "embedding": embedding.tolist() if hasattr(embedding, 'tolist') else embedding,
+                "metadata": metadata  # Keep original metadata for compatibility
             }
 
             # Upsert to Qdrant
-            self._upsert_chunk(self.collection_name, chunk_id, embedding, payload)
+            self._upsert_chunk(self.collection_name, chunk_id, embedding, enriched_chunk)
+            enriched_chunks.append(enriched_chunk)
 
         # Mark processed
         self.ingest.mark_as_processed(object_name)
-        return {"status": "processed", "file": object_name, "chunks_indexed": len(chunks)}
+        return {
+            "status": "processed", 
+            "file": object_name, 
+            "chunks_indexed": len(chunks),
+            "enriched_chunks": enriched_chunks
+        }
 
     def process_new_files(self) -> List[dict]:
         new_files = self.ingest.get_new_files()
