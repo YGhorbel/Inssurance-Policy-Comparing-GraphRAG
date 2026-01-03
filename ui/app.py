@@ -4,7 +4,9 @@ import uuid
 
 st.set_page_config(page_title="Tunisian Insurance Legal Assistant", layout="wide")
 
-API_URL = "http://localhost:8000/mcp"
+
+API_URL = "http://localhost:8001/mcp"
+
 
 # Status emoji mapping for document display
 STATUS_EMOJIS = {

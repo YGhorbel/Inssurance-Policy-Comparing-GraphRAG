@@ -156,7 +156,7 @@ uvicorn api.server:app --reload --host 0.0.0.0 --port 8000
 - Ingest documents (via MCP JSON-RPC) — example: trigger planner ingestion
 
 ```powershell
-curl -X POST http://localhost:8000/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"ingest_documents","id":"1"}'
+curl -X POST http://localhost:8001/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"ingest_documents","id":"1"}'
 ```
 
 - Ingest Qdrant → Neo4j (GraphRAG) via API
