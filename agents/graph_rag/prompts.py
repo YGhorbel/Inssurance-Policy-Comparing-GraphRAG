@@ -1,4 +1,8 @@
 class GraphPrompts:
+    # Token limits for text truncation
+    MAX_TEXT_LENGTH = 1500
+    MAX_SUMMARY_LENGTH = 500
+    
     EXTRACTION_TEMPLATE = """You are a Neo4j Graph Agent. Output ONLY valid Cypher. No explanations, no markdown.
 
 SCHEMA:
@@ -51,9 +55,9 @@ Generate Cypher:"""
         keywords_str = ", ".join(keywords) if isinstance(keywords, list) else str(keywords)
         requirements_str = "; ".join(requirements) if isinstance(requirements, list) else str(requirements)
         
-        # Limit text to avoid token overflow
-        truncated = text[:1500] if len(text) > 1500 else text
-        summary_truncated = summary[:500] if len(summary) > 500 else summary
+        # Limit text to avoid token overflow using class constants
+        truncated = text[:GraphPrompts.MAX_TEXT_LENGTH] if len(text) > GraphPrompts.MAX_TEXT_LENGTH else text
+        summary_truncated = summary[:GraphPrompts.MAX_SUMMARY_LENGTH] if len(summary) > GraphPrompts.MAX_SUMMARY_LENGTH else summary
         
         return GraphPrompts.EXTRACTION_TEMPLATE.format(
             text=truncated,

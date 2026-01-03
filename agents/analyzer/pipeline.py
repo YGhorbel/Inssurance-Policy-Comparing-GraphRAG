@@ -181,7 +181,7 @@ class AnalyzerPipeline:
         chunks = self.chunker.chunk_documents(docs)
 
         enriched_chunks = []
-        for idx, c in enumerate(chunks):
+        for c in chunks:
             text = c.page_content
             metadata = c.metadata
 
