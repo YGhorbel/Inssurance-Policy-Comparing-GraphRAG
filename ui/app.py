@@ -87,8 +87,9 @@ with tab1:
                                     st.metric("Routing", classification)
                                     
                                     entities = analysis.get("entities", {})
-                                    if entities.get("region"):
-                                        st.write("**Regions:**", ", ".join(entities.get("region", [])))
+                                    region = entities.get("region", [])
+                                    if region and isinstance(region, list):
+                                        st.write("**Regions:**", ", ".join(region))
                                     if entities.get("topic"):
                                         st.write("**Topic:**", entities.get("topic", "N/A"))
                             
@@ -181,12 +182,13 @@ with tab2:
             # Enhanced document title with status badge and chunk count
             status = doc['status']
             status_emoji = STATUS_EMOJIS.get(status, "❓")
-            chunks_info = f" - {doc.get('chunks_count', 0)} chunks" if doc.get('chunks_count') else ""
+            chunks_count = doc.get('chunks_count')
+            chunks_info = f" - {chunks_count} chunks" if chunks_count is not None and chunks_count > 0 else ""
             
             with st.expander(f"{status_emoji} {doc['filename']} ({doc['country']}){chunks_info}"):
                 # Show enrichment info for processed documents
-                if status == "processed" and doc.get('chunks_count'):
-                    st.info(f"📚 Document enriched with {doc['chunks_count']} chunks containing summaries, keywords, questions, and requirements")
+                if status == "processed" and chunks_count is not None and chunks_count > 0:
+                    st.info(f"📚 Document enriched with {chunks_count} chunks containing summaries, keywords, questions, and requirements")
                 
                 c1, c2, c3 = st.columns(3)
                 new_country = c1.selectbox("Country", ["Tunisia", "Europe", "France", "Unknown"], index=["Tunisia", "Europe", "France", "Unknown"].index(doc.get("country", "Unknown")), key=f"c_{doc['id']}")
