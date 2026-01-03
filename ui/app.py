@@ -177,9 +177,9 @@ with tab2:
         with col4:
             # Safely sum chunks_count, handling non-numeric values
             total_chunks = sum(
-                d.get("chunks_count", 0) 
+                chunks 
                 for d in processed_docs 
-                if isinstance(d.get("chunks_count"), (int, float))
+                if isinstance(chunks := d.get("chunks_count"), (int, float))
             )
             st.metric("Total Enriched Chunks", int(total_chunks))
         
