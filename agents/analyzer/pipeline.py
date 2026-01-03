@@ -18,6 +18,10 @@ DEFAULT_COLLECTION = "regulations_chunks"
 
 
 class AnalyzerPipeline:
+    # Enrichment configuration constants
+    MAX_KEYWORDS = 10
+    MAX_QUESTIONS = 5
+    
     def __init__(self, config_path="configs/config.yaml"):
         with open(config_path, "r") as f:
             cfg = yaml.safe_load(f)
@@ -107,7 +111,7 @@ class AnalyzerPipeline:
         if parsed:
             return parsed
         # Fallback: split by commas if not valid JSON
-        return [k.strip() for k in result.split(',') if k.strip()][:10]
+        return [k.strip() for k in result.split(',') if k.strip()][:self.MAX_KEYWORDS]
 
     def _generate_questions(self, text: str) -> list:
         prompt = (
@@ -119,7 +123,7 @@ class AnalyzerPipeline:
         if parsed:
             return parsed
         # Fallback: split by newlines
-        return [q.strip() for q in result.split('\n') if q.strip() and '?' in q][:5]
+        return [q.strip() for q in result.split('\n') if q.strip() and '?' in q][:self.MAX_QUESTIONS]
 
     def _extract_requirements(self, text: str) -> list:
         prompt = (
