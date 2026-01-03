@@ -11,8 +11,21 @@ class GraphBuilder:
     def process_text_chunk(self, text: str, metadata: dict = None):
         """
         Generates Cypher from text, validates, and executes it.
+        Handles both enriched chunk structure and legacy metadata.
         """
-        prompt = GraphPrompts.get_extraction_prompt(text, metadata)
+        # If metadata contains the enriched structure, extract it
+        if metadata and isinstance(metadata, dict):
+            # Check if this is an enriched chunk
+            if "summary" in metadata and "keywords" in metadata:
+                # This is already enriched, use directly
+                enriched_metadata = metadata
+            else:
+                # Legacy format, pass as-is
+                enriched_metadata = metadata
+        else:
+            enriched_metadata = {}
+        
+        prompt = GraphPrompts.get_extraction_prompt(text, enriched_metadata)
         response = self.llm.generate(prompt)
         
         if response:

@@ -32,11 +32,13 @@ This project builds an end-to-end pipeline that:
 
 ## Architecture & components
 - MinIO: object storage for raw PDFs and versions
-- Analyzer Agent: chunking, summarization, requirement extraction, embeddings
+- Analyzer Agent (Knowledge Ingestion): chunking, enrichment (summary, keywords, questions), requirement extraction, metadata classification, embeddings storage in Qdrant
 - Qdrant: single vector store for all chunks + metadata
 - Neo4j: knowledge graph (countries, policies, requirements, docs)
 - GraphRAG: combined vector + graph retrieval and reasoning
 - Planner & Summarizer agents: compose outputs and orchestrate workflows
+  - Phase 1: Document summarization
+  - Phase 2: Comparison, gap analysis, and recommendations
 - FastAPI: API endpoints for triggers and agent comms
 - Streamlit: admin dashboard and chat interface
 
@@ -45,17 +47,40 @@ Example graph schema:
 
 ## Data flow
 1. Upload PDFs → MinIO (with metadata)
-2. Analyzer Agent:
+2. Analyzer Agent (Knowledge Ingestion):
    - Chunk documents (preserve headings/tables)
-   - Summarize chunks
+   - Enrich chunks with summary, keywords, and questions
    - Extract explicit requirements
+   - Classify metadata (country, policy_type, clause_type)
    - Generate embeddings
-3. Store enriched chunks in Qdrant
+   - Store enriched chunks in Qdrant with complete metadata
+3. Enriched chunk structure stored in Qdrant:
+   ```json
+   {
+     "chunk_id": "...",
+     "text": "...",
+     "summary": "...",
+     "keywords": [...],
+     "questions": [...],
+     "country": "Tunisia",
+     "policy_type": "Auto",
+     "clause_type": "Requirement",
+     "extracted_requirements": [...],
+     "source": {
+       "document": "...",
+       "page": 12,
+       "section": "Article 5"
+     },
+     "embedding": [...]
+   }
+   ```
 4. GraphRAG:
    - Retrieve similar clauses from Qdrant
-   - Traverse/augment Neo4j graph
+   - Traverse/augment Neo4j graph using enriched metadata
    - Produce comparative analyses
 5. Summarizer / Planner → Streamlit / API outputs
+   - Phase 1: Document summaries
+   - Phase 2: Comparisons, gap analyses, and recommendations
 
 ## Core technologies
 - Storage: MinIO
