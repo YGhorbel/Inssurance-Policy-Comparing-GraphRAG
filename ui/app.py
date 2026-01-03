@@ -6,6 +6,14 @@ st.set_page_config(page_title="Tunisian Insurance Legal Assistant", layout="wide
 
 API_URL = "http://localhost:8000/mcp"
 
+# Status emoji mapping for document display
+STATUS_EMOJIS = {
+    "pending": "⏳",
+    "processing": "⚙️",
+    "processed": "✅",
+    "error": "❌"
+}
+
 st.title("🤖 Legal & Regulatory Multi-Agent Assistant")
 st.markdown("*Architecture: LiquidAI LFM2-2.6B + Qdrant + Neo4j + MinIO (Orchestrated via MCP)*")
 
@@ -172,13 +180,13 @@ with tab2:
         for doc in metadata:
             # Enhanced document title with status badge and chunk count
             status = doc['status']
-            status_emoji = {"pending": "⏳", "processing": "⚙️", "processed": "✅", "error": "❌"}.get(status, "❓")
+            status_emoji = STATUS_EMOJIS.get(status, "❓")
             chunks_info = f" - {doc.get('chunks_count', 0)} chunks" if doc.get('chunks_count') else ""
             
             with st.expander(f"{status_emoji} {doc['filename']} ({doc['country']}){chunks_info}"):
                 # Show enrichment info for processed documents
                 if status == "processed" and doc.get('chunks_count'):
-                    st.info(f"📚 Document enriched with {doc.get('chunks_count', 0)} chunks containing summaries, keywords, questions, and requirements")
+                    st.info(f"📚 Document enriched with {doc['chunks_count']} chunks containing summaries, keywords, questions, and requirements")
                 
                 c1, c2, c3 = st.columns(3)
                 new_country = c1.selectbox("Country", ["Tunisia", "Europe", "France", "Unknown"], index=["Tunisia", "Europe", "France", "Unknown"].index(doc.get("country", "Unknown")), key=f"c_{doc['id']}")
