@@ -6,8 +6,37 @@ st.set_page_config(page_title="Tunisian Insurance Legal Assistant", layout="wide
 
 API_URL = "http://localhost:8000/mcp"
 
+# Status emoji mapping for document display
+STATUS_EMOJIS = {
+    "pending": "⏳",
+    "processing": "⚙️",
+    "processed": "✅",
+    "error": "❌"
+}
+
+# Document metadata options
+COUNTRY_OPTIONS = ["Tunisia", "Europe", "France", "Unknown"]
+DOC_TYPE_OPTIONS = ["Regulation", "Law", "Guideline"]
+
 st.title("🤖 Legal & Regulatory Multi-Agent Assistant")
 st.markdown("*Architecture: LiquidAI LFM2-2.6B + Qdrant + Neo4j + MinIO (Orchestrated via MCP)*")
+
+# Add information about enriched knowledge ingestion
+with st.expander("ℹ️ About Knowledge Enrichment System", expanded=False):
+    st.markdown("""
+    ### 📚 Enriched Knowledge Ingestion
+    
+    Our advanced analyzer agent transforms raw documents into enriched knowledge chunks with:
+    
+    - **📝 Summaries**: Concise summaries for each chunk
+    - **🔑 Keywords**: Extracted key insurance terms and concepts
+    - **❓ Questions**: Generated questions that each chunk can answer
+    - **📋 Requirements**: Explicit requirements and obligations extracted
+    - **🏷️ Classifications**: Policy type (Auto, Health, Life, etc.) and Clause type (Requirement, Coverage, etc.)
+    - **🔗 Metadata**: Enhanced source tracking with page and section information
+    
+    This enrichment enables more accurate search, better context understanding, and comprehensive policy analysis.
+    """)
 
 # Initialize Chat History
 if "messages" not in st.session_state:
@@ -51,7 +80,30 @@ with tab1:
                         
                         st.markdown(answer)
                         
-                        with st.expander("Agent Reasoning (Trace)"):
+                        # Display enriched analysis information
+                        with st.expander("📊 Agent Reasoning & Analysis"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.subheader("Query Analysis")
+                                if analysis:
+                                    classification = analysis.get("classification", "N/A")
+                                    st.metric("Routing", classification)
+                                    
+                                    entities = analysis.get("entities", {})
+                                    region = entities.get("region", [])
+                                    if isinstance(region, list) and region:
+                                        st.write("**Regions:**", ", ".join(str(r) for r in region))
+                                    if entities.get("topic"):
+                                        st.write("**Topic:**", entities.get("topic", "N/A"))
+                            
+                            with col2:
+                                st.subheader("Context Stats")
+                                context_used = result.get("context_used", 0)
+                                st.metric("Context Size", f"{context_used} chars")
+                            
+                            st.divider()
+                            st.subheader("Full Analysis Trace")
                             st.json(analysis)
                         
                         # Add to history
@@ -108,14 +160,68 @@ with tab2:
         metadata = res.get("result", [])
     except:
         metadata = []
+    
+    # Display enrichment statistics
+    if metadata:
+        processed_docs = [d for d in metadata if d.get("status") == "processed"]
+        pending_docs = [d for d in metadata if d.get("status") == "pending"]
+        
+        st.subheader("📈 Document Statistics")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Documents", len(metadata))
+        with col2:
+            st.metric("Processed", len(processed_docs))
+        with col3:
+            st.metric("Pending", len(pending_docs))
+        with col4:
+            # Safely sum chunks_count, handling non-numeric values
+            total_chunks = sum(
+                chunks 
+                for d in processed_docs 
+                if isinstance(chunks := d.get("chunks_count"), (int, float))
+            )
+            st.metric("Total Enriched Chunks", int(total_chunks))
+        
+        st.divider()
 
     if metadata:
         # Edit Mode
         for doc in metadata:
-            with st.expander(f"{doc['filename']} ({doc['country']}) - {doc['status']}"):
+            # Enhanced document title with status badge and chunk count
+            status = doc.get('status', 'unknown')
+            status_emoji = STATUS_EMOJIS.get(status, "❓")
+            chunks_count = doc.get('chunks_count')
+            
+            # Safely display chunk count (handle None and non-numeric values)
+            if isinstance(chunks_count, (int, float)) and chunks_count > 0:
+                chunks_info = f" - {int(chunks_count)} chunks"
+            else:
+                chunks_info = ""
+            
+            with st.expander(f"{status_emoji} {doc['filename']} ({doc['country']}){chunks_info}"):
+                # Show enrichment info for processed documents
+                if status == "processed" and isinstance(chunks_count, (int, float)) and chunks_count > 0:
+                    st.info(f"📚 Document enriched with {int(chunks_count)} chunks containing summaries, keywords, questions, and requirements")
+                
                 c1, c2, c3 = st.columns(3)
-                new_country = c1.selectbox("Country", ["Tunisia", "Europe", "France", "Unknown"], index=["Tunisia", "Europe", "France", "Unknown"].index(doc.get("country", "Unknown")), key=f"c_{doc['id']}")
-                new_type = c2.selectbox("Type", ["Regulation", "Law", "Guideline"], index=["Regulation", "Law", "Guideline"].index(doc.get("doc_type", "Regulation")), key=f"t_{doc['id']}")
+                
+                # Safely get index for country selectbox
+                current_country = doc.get("country", "Unknown")
+                try:
+                    country_index = COUNTRY_OPTIONS.index(current_country)
+                except ValueError:
+                    country_index = COUNTRY_OPTIONS.index("Unknown")
+                
+                # Safely get index for doc_type selectbox
+                current_type = doc.get("doc_type", "Regulation")
+                try:
+                    type_index = DOC_TYPE_OPTIONS.index(current_type)
+                except ValueError:
+                    type_index = DOC_TYPE_OPTIONS.index("Regulation")
+                
+                new_country = c1.selectbox("Country", COUNTRY_OPTIONS, index=country_index, key=f"c_{doc['id']}")
+                new_type = c2.selectbox("Type", DOC_TYPE_OPTIONS, index=type_index, key=f"t_{doc['id']}")
                 
                 if st.button("Save Changes", key=f"save_{doc['id']}"):
                     updates = {"country": new_country, "doc_type": new_type}
