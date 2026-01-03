@@ -46,9 +46,27 @@ class QdrantToNeo4jIngestor:
         success = 0
         for p in self._iterate_points():
             payload = getattr(p, 'payload', None) or p.get('payload', {})
-            # payload expected to contain original_text and metadata
-            text = payload.get('original_text') or payload.get('text')
-            metadata = payload.get('metadata', {})
+            
+            # Handle enriched chunk structure
+            text = payload.get('text') or payload.get('original_text')
+            
+            # Build metadata for Neo4j from enriched structure
+            metadata = {
+                "chunk_id": payload.get("chunk_id", ""),
+                "country": payload.get("country", "Unknown"),
+                "policy_type": payload.get("policy_type", "General"),
+                "clause_type": payload.get("clause_type", "Requirement"),
+                "summary": payload.get("summary", ""),
+                "keywords": payload.get("keywords", []),
+                "extracted_requirements": payload.get("extracted_requirements", []),
+                "source": payload.get("source", {}),
+            }
+            
+            # Fallback to legacy metadata if enriched structure not present
+            if not text:
+                text = payload.get('original_text')
+                if payload.get('metadata'):
+                    metadata.update(payload.get('metadata', {}))
 
             if not text:
                 continue
