@@ -1,6 +1,8 @@
 import os
 import hashlib
 import yaml
+import json
+import re
 from typing import List
 
 from ingestion.pdf_loader import IngestionPipeline
@@ -76,6 +78,21 @@ class AnalyzerPipeline:
         base = f"{metadata.get('filename','')}-{metadata.get('chunk_id','')}-{text[:64]}"
         return hashlib.sha1(base.encode("utf-8")).hexdigest()
 
+    def _parse_json_from_llm(self, result: str, expect_array: bool = True):
+        """Helper method to extract JSON from LLM response."""
+        try:
+            # Try to extract JSON array or object from response
+            if expect_array:
+                match = re.search(r'\[.*\]', result, re.DOTALL)
+            else:
+                match = re.search(r'\{.*\}', result, re.DOTALL)
+            
+            if match:
+                return json.loads(match.group(0))
+        except Exception:
+            pass
+        return None
+
     def _summarize(self, text: str) -> str:
         prompt = f"Summarize the following insurance regulation text in a concise paragraph:\n\n{text}"
         return self.llm.generate(prompt)
@@ -86,15 +103,9 @@ class AnalyzerPipeline:
             "Return ONLY a JSON array of keyword strings.\n\n" + text
         )
         result = self.llm.generate(prompt)
-        try:
-            import json
-            import re
-            # Try to extract JSON array from response
-            match = re.search(r'\[.*\]', result, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-        except Exception:
-            pass
+        parsed = self._parse_json_from_llm(result, expect_array=True)
+        if parsed:
+            return parsed
         # Fallback: split by commas if not valid JSON
         return [k.strip() for k in result.split(',') if k.strip()][:10]
 
@@ -104,15 +115,9 @@ class AnalyzerPipeline:
             "Return ONLY a JSON array of question strings.\n\n" + text
         )
         result = self.llm.generate(prompt)
-        try:
-            import json
-            import re
-            # Try to extract JSON array from response
-            match = re.search(r'\[.*\]', result, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-        except Exception:
-            pass
+        parsed = self._parse_json_from_llm(result, expect_array=True)
+        if parsed:
+            return parsed
         # Fallback: split by newlines
         return [q.strip() for q in result.split('\n') if q.strip() and '?' in q][:5]
 
@@ -122,15 +127,9 @@ class AnalyzerPipeline:
             "Return as a JSON array of requirement strings.\n\n" + text
         )
         result = self.llm.generate(prompt)
-        try:
-            import json
-            import re
-            # Try to extract JSON array from response
-            match = re.search(r'\[.*\]', result, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-        except Exception:
-            pass
+        parsed = self._parse_json_from_llm(result, expect_array=True)
+        if parsed:
+            return parsed
         # Fallback: return as single-item list
         return [result] if result else []
 
@@ -151,15 +150,9 @@ class AnalyzerPipeline:
             "clause_type": "Requirement"  # Default
         }
         
-        try:
-            import json
-            import re
-            match = re.search(r'\{.*\}', result, re.DOTALL)
-            if match:
-                parsed = json.loads(match.group(0))
-                classification.update(parsed)
-        except Exception:
-            pass
+        parsed = self._parse_json_from_llm(result, expect_array=False)
+        if parsed:
+            classification.update(parsed)
         
         return classification
 
