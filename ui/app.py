@@ -9,6 +9,23 @@ API_URL = "http://localhost:8000/mcp"
 st.title("🤖 Legal & Regulatory Multi-Agent Assistant")
 st.markdown("*Architecture: LiquidAI LFM2-2.6B + Qdrant + Neo4j + MinIO (Orchestrated via MCP)*")
 
+# Add information about enriched knowledge ingestion
+with st.expander("ℹ️ About Knowledge Enrichment System", expanded=False):
+    st.markdown("""
+    ### 📚 Enriched Knowledge Ingestion
+    
+    Our advanced analyzer agent transforms raw documents into enriched knowledge chunks with:
+    
+    - **📝 Summaries**: Concise summaries for each chunk
+    - **🔑 Keywords**: Extracted key insurance terms and concepts
+    - **❓ Questions**: Generated questions that each chunk can answer
+    - **📋 Requirements**: Explicit requirements and obligations extracted
+    - **🏷️ Classifications**: Policy type (Auto, Health, Life, etc.) and Clause type (Requirement, Coverage, etc.)
+    - **🔗 Metadata**: Enhanced source tracking with page and section information
+    
+    This enrichment enables more accurate search, better context understanding, and comprehensive policy analysis.
+    """)
+
 # Initialize Chat History
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -51,7 +68,29 @@ with tab1:
                         
                         st.markdown(answer)
                         
-                        with st.expander("Agent Reasoning (Trace)"):
+                        # Display enriched analysis information
+                        with st.expander("📊 Agent Reasoning & Analysis"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.subheader("Query Analysis")
+                                if analysis:
+                                    classification = analysis.get("classification", "N/A")
+                                    st.metric("Routing", classification)
+                                    
+                                    entities = analysis.get("entities", {})
+                                    if entities.get("region"):
+                                        st.write("**Regions:**", ", ".join(entities.get("region", [])))
+                                    if entities.get("topic"):
+                                        st.write("**Topic:**", entities.get("topic", "N/A"))
+                            
+                            with col2:
+                                st.subheader("Context Stats")
+                                context_used = result.get("context_used", 0)
+                                st.metric("Context Size", f"{context_used} chars")
+                            
+                            st.divider()
+                            st.subheader("Full Analysis Trace")
                             st.json(analysis)
                         
                         # Add to history
@@ -108,11 +147,39 @@ with tab2:
         metadata = res.get("result", [])
     except:
         metadata = []
+    
+    # Display enrichment statistics
+    if metadata:
+        processed_docs = [d for d in metadata if d.get("status") == "processed"]
+        pending_docs = [d for d in metadata if d.get("status") == "pending"]
+        
+        st.subheader("📈 Document Statistics")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Documents", len(metadata))
+        with col2:
+            st.metric("Processed", len(processed_docs))
+        with col3:
+            st.metric("Pending", len(pending_docs))
+        with col4:
+            total_chunks = sum(d.get("chunks_count", 0) for d in processed_docs)
+            st.metric("Total Enriched Chunks", total_chunks)
+        
+        st.divider()
 
     if metadata:
         # Edit Mode
         for doc in metadata:
-            with st.expander(f"{doc['filename']} ({doc['country']}) - {doc['status']}"):
+            # Enhanced document title with status badge and chunk count
+            status = doc['status']
+            status_emoji = {"pending": "⏳", "processing": "⚙️", "processed": "✅", "error": "❌"}.get(status, "❓")
+            chunks_info = f" - {doc.get('chunks_count', 0)} chunks" if doc.get('chunks_count') else ""
+            
+            with st.expander(f"{status_emoji} {doc['filename']} ({doc['country']}){chunks_info}"):
+                # Show enrichment info for processed documents
+                if status == "processed" and doc.get('chunks_count'):
+                    st.info(f"📚 Document enriched with {doc.get('chunks_count', 0)} chunks containing summaries, keywords, questions, and requirements")
+                
                 c1, c2, c3 = st.columns(3)
                 new_country = c1.selectbox("Country", ["Tunisia", "Europe", "France", "Unknown"], index=["Tunisia", "Europe", "France", "Unknown"].index(doc.get("country", "Unknown")), key=f"c_{doc['id']}")
                 new_type = c2.selectbox("Type", ["Regulation", "Law", "Guideline"], index=["Regulation", "Law", "Guideline"].index(doc.get("doc_type", "Regulation")), key=f"t_{doc['id']}")
