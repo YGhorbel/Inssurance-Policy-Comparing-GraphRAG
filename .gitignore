@@ -71,4 +71,12 @@ Thumbs.db
 # Test artifacts
 check_gpu.py
 test_*.py
+!evaluation/test_*.py
+
+# Evaluation outputs and runtime logs
+evaluation/results/
+logs/
+
+# Agent session state
+.claude-flow/
 
