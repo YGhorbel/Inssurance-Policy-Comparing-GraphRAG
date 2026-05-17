@@ -20,7 +20,15 @@ async def query_knowledge_graph(cypher_query: str) -> list:
 
 async def compare_policies(policy_a: str, policy_b: str) -> str:
     """
-    Compare two policies by looking up their sub-graph and checking for CONFLICTS_WITH or EQUIVALENT_TO relations.
+    Compare two policies by looking up their sub-graphs.
+
+    The reconciled Phase 1 taxonomy commits to CONFLICTS_WITH and
+    EQUIVALENT_TO as the two cross-jurisdictional edge types this query
+    is meant to surface, but the Cypher below intentionally does NOT
+    constrain on those types yet: under the previous prompt taxonomy
+    zero such edges were ever produced, so a typed match would silently
+    return empty until the corpus is reingested in Phase 5. A typed
+    query rewrite is scheduled for Phase 5.
     """
     query = """
     MATCH (a:Regulation {name: $p1})
