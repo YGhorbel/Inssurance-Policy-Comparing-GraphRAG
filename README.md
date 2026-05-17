@@ -95,19 +95,12 @@ Example graph schema:
 - Deployment: Docker Compose
 
 ## Quick start (high level)
-1. Install Docker & Docker Compose (Windows)
-2. Configure .env with MinIO, Qdrant, Neo4j credentials
-3. Start services:
-   - Open PowerShell in project root:
-     - docker-compose up -d
-4. Run backend API & agents:
-   - Activate your Python venv
-   - pip install -r requirements.txt
-   - python -m app.main  # example entrypoint
-5. Open Streamlit dashboard:
-   - streamlit run app/ui/dashboard.py
-
-(Adjust commands/entrypoints to match your local structure.)
+1. Install Docker & Docker Compose
+2. Configure `.env` with MinIO, Qdrant, Neo4j credentials
+3. Start services: `docker-compose up -d`
+4. `pip install -r requirements.txt`
+5. Run backend API & agents: `uvicorn api.server:app --reload --host 0.0.0.0 --port 8001`
+6. Open Streamlit dashboard: `streamlit run ui/app.py`
 
 ## Run locally (Windows — recommended quick steps)
 
@@ -150,7 +143,7 @@ MINIO_SECRET_KEY=minioadmin
 - Start the FastAPI server (backend / MCP endpoint)
 
 ```powershell
-uvicorn api.server:app --reload --host 0.0.0.0 --port 8000
+uvicorn api.server:app --reload --host 0.0.0.0 --port 8001
 ```
 
 - Ingest documents (via MCP JSON-RPC) — example: trigger planner ingestion
@@ -162,7 +155,7 @@ curl -X POST http://localhost:8001/mcp -H "Content-Type: application/json" -d '{
 - Ingest Qdrant → Neo4j (GraphRAG) via API
 
 ```powershell
-curl -X POST http://localhost:8000/graph/ingest
+curl -X POST http://localhost:8001/graph/ingest
 ```
 
 - Run the Streamlit UI
@@ -174,7 +167,7 @@ streamlit run ui/app.py
 - Example retrieval fusion (compare/analysis) via API
 
 ```powershell
-curl -X POST http://localhost:8000/graph/retrieve -H "Content-Type: application/json" -d '{"query":"compare auto insurance Tunisia France","top_k":5}'
+curl -X POST http://localhost:8001/graph/retrieve -H "Content-Type: application/json" -d '{"query":"compare auto insurance Tunisia France","top_k":5}'
 ```
 
 Notes

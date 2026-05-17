@@ -26,45 +26,30 @@ uvicorn api.server:app --reload --host 0.0.0.0 --port 8001
 streamlit run ui/app.py
 ```
 
-`app.py` at the repo root is a *different*, older Streamlit UI that drives the standalone `ingestion.pipeline.Pipeline` directly (no MCP, no Qdrant) — see "Two parallel pipelines" below before editing.
-
 ## Common commands
 
 ```bash
-# Run the legacy direct ingestion pipeline (MinIO → chunks → Neo4j, no Qdrant)
-python main.py
-
-# Trigger MCP-based ingestion (Qdrant + Neo4j) via JSON-RPC
+# Trigger ingestion via JSON-RPC (MinIO → Qdrant → Neo4j)
 curl -X POST http://localhost:8001/mcp -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"ingest_documents","id":"1"}'
 
 # Project Qdrant chunks into Neo4j
 curl -X POST http://localhost:8001/graph/ingest
 
-# GraphRAG retrieval fusion
+# Hybrid retrieval (RRF over vector + graph-driven chunk rankings)
 curl -X POST http://localhost:8001/graph/retrieve \
   -H "Content-Type: application/json" \
   -d '{"query":"compare auto insurance Tunisia France","top_k":5}'
 
-# Direct CLI query against Neo4j (legacy path)
-python query.py summarize "GDPR Article 12"
-python query.py compare "Reg A" "Reg B"
+# RRF smoke test
+python3 evaluation/test_rrf_smoke.py
 ```
 
-There is no test suite, no linter config, and no build step — `.gitignore` excludes `test_*.py` and `check_gpu.py` as ad-hoc test artifacts.
+There is no full test suite, no linter config, and no build step. `.gitignore` masks ad-hoc `test_*.py` artifacts at the repo root, but the negation `!evaluation/test_*.py` keeps anything under `evaluation/` tracked.
 
 ## Architecture
 
-### Two parallel pipelines (important)
-
-The repo contains **two coexisting implementations** that both ingest PDFs but use different stacks. Edits to one do not affect the other.
-
-| Pipeline | Entry | Stack | Used by |
-|---|---|---|---|
-| **MCP / multi-agent** (current) | `api/server.py` + `ui/app.py` | `agents/*` + `core/` + Qdrant + Neo4j | Streamlit chat, `/mcp` endpoint |
-| **Legacy direct** | `main.py` + `app.py` (root) | `ingestion/` + `processing/` + `graph/` + `models/` | `python main.py`, root Streamlit |
-
-The legacy pipeline writes Cypher directly from LLM output via `ingestion/graph_builder.py`; the MCP pipeline goes through Qdrant first and then `agents/graph_rag/qdrant_ingest.py` projects enriched chunks into Neo4j. New work should target the MCP pipeline unless explicitly asked otherwise.
+The repo has one canonical pipeline: the MCP-based multi-agent stack rooted at `api/server.py` and `ui/app.py`. The previous direct ingestion path (`main.py`, root `app.py`, `query.py`, plus `ingestion/pipeline.py`, `graph/`, `models/`) has been retired to `legacy/` and is kept for historical reference only — do not import from it. The dirs `ingestion/` and `processing/` remain at the repo root but are now deprecated namespace directories holding three modules (`ingestion/pdf_loader.py`, `ingestion/minio_loader.py`, `processing/chunker.py`) still imported by `agents/analyzer/pipeline.py`; full migration under `agents/shared/` is deferred to Phase 2.
 
 ### MCP agent registry
 
@@ -76,15 +61,12 @@ The legacy pipeline writes Cypher directly from LLM output via `ingestion/graph_
 - **`analyzer`** — `analyze_query` classifies user intent; `AnalyzerPipeline.process_file` does the heavy enrichment: summary, keywords, questions, requirements, policy/clause classification, embedding, then upsert to Qdrant.
 - **`document_access`** — MinIO listing/download, PDF text extraction (`pypdf`), and JSON-file-backed metadata (`MetadataManager`).
 - **`rag`** — Qdrant search + `rag_ingest_chunks`. Uses `agents/shared/chunking.py` (Chonkie semantic chunker).
-- **`graph_rag`** — `GraphBuilder` (LLM → Cypher), `QdrantToNeo4jIngestor` (Qdrant scroll → graph), `GraphRAG.retrieve` (vector hits + graph neighborhood expansion + LLM synthesis).
+- **`graph_rag`** — `GraphBuilder` (LLM → Cypher, validated against the 7-edge schema in `validator.py`), `QdrantToNeo4jIngestor` (Qdrant scroll → graph), `GraphRAG.retrieve` (Qdrant vector ranking + Neo4j-driven entity-to-chunk ranking → RRF fusion → LLM synthesis; see `agents/shared/fusion.py`).
 - **`summarizer`** — Phase 1 answer synthesis + Phase 2 prompts (`summarize_comparison`, `summarize_gaps`, `summarize_recommendations`).
 
-### LLM clients (there are two)
+### LLM client
 
-- `core/llm/client.py::LiquidClient` — singleton, uses HuggingFace `transformers.pipeline`, loaded once per process. Used by all `agents/*`.
-- `models/hf_client.py::FHClient` — 4-bit-quantized variant with Streamlit `cache_resource` + a CLI module-level cache. Used by the legacy `query.py` and `ingestion/pipeline.py`.
-
-Both default to `LiquidAI/LFM2-2.6B-Exp` per `configs/config.yaml`. Don't add a third client — pick one based on which pipeline you're touching.
+`core/llm/client.py::LiquidClient` is the canonical singleton — uses HuggingFace `transformers.pipeline`, loaded once per process. Defaults to `LiquidAI/LFM2-2.6B-Exp` per `configs/config.yaml`. (The legacy 4-bit `FHClient` lives in `legacy/models/hf_client.py` for historical reference only.)
 
 ### Enriched chunk schema (Qdrant payload)
 
@@ -106,8 +88,9 @@ Qdrant collection name comes from `configs/config.yaml::qdrant.collection` (defa
 
 ## Project conventions
 
-- All Python imports assume the repo root is on `sys.path`. Entry points (`app.py`, `api/server.py`) append it explicitly; if you create a new entry point do the same.
+- All Python imports assume the repo root is on `sys.path`. Entry points (`api/server.py`) append it explicitly; if you create a new entry point do the same.
 - Agents print init banners on import (`print("X Agent initialized.")`) — this is the registration signal. Keep it.
-- LLM responses are parsed with regex-extracted JSON (`re.search(r'\{.*\}', ..., re.DOTALL)`) and silent fallbacks. When adding new LLM-driven extractors, follow the same pattern in `AnalyzerPipeline._parse_json_from_llm` rather than failing hard.
+- LLM responses are parsed with regex-extracted JSON (`re.search(r'\{.*\}', ..., re.DOTALL)`) and fallbacks. When adding new LLM-driven extractors, follow the same pattern in `AnalyzerPipeline._parse_json_from_llm` rather than failing hard.
 - Qdrant client method names differ across versions — existing code wraps calls in try/except with fallbacks (`create_collection` → `recreate_collection`, `scroll` → `get`). Preserve this when extending.
-- Temp PDFs are downloaded to `temp_*.pdf` in CWD (gitignored). Don't refactor without updating both pipelines.
+- Temp PDFs are downloaded to `temp_*.pdf` in CWD (gitignored).
+- The `legacy/` tree is not on the import path and must not be imported from new code; it exists for git-history traceability only.
