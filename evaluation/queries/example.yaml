@@ -1,0 +1,11 @@
+- query: "What requirements does the Tunisian Insurance Code impose on motor vehicles?"
+  expected_chunks: []
+  tags: ["tunisia", "auto", "requirements"]
+
+- query: "Compare auto insurance liability obligations between Tunisia and France."
+  expected_chunks: []
+  tags: ["tunisia", "france", "comparison"]
+
+- query: "Where does Tunisian law conflict with EU insurance directives on coverage exclusions?"
+  expected_chunks: []
+  tags: ["tunisia", "eu", "conflicts"]

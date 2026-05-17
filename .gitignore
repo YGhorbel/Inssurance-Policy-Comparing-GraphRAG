@@ -74,7 +74,8 @@ test_*.py
 !evaluation/test_*.py
 
 # Evaluation outputs and runtime logs
-evaluation/results/
+evaluation/results/*
+!evaluation/results/.gitkeep
 logs/
 
 # Agent session state
