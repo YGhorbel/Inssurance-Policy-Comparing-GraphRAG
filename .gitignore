@@ -82,3 +82,4 @@ logs/
 # Agent session state
 .claude-flow/
 
+.claude/

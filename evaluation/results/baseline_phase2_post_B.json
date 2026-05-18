@@ -1,0 +1,116 @@
+{
+  "phase": "phase2_post_B",
+  "captured_at": "2026-05-18T01:00:22Z",
+  "query_trace": [
+    {
+      "query": "What does Tunisian regulation require for motor-vehicle liability cover?",
+      "latency_ms": 25036,
+      "retrieved_chunk_ids": [
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0",
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1"
+      ]
+    },
+    {
+      "query": "List the obligations for health insurance providers in Tunisia.",
+      "latency_ms": 23041,
+      "retrieved_chunk_ids": [
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0",
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1"
+      ]
+    },
+    {
+      "query": "How does the Tunisian Insurance Code define third-party coverage?",
+      "latency_ms": 23683,
+      "retrieved_chunk_ids": [
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0"
+      ]
+    },
+    {
+      "query": "What are the exclusions under Tunisian auto insurance?",
+      "latency_ms": 21457,
+      "retrieved_chunk_ids": [
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0",
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1"
+      ]
+    },
+    {
+      "query": "Compare auto-insurance obligations between Tunisia and France.",
+      "latency_ms": 29399,
+      "retrieved_chunk_ids": [
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0",
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1"
+      ]
+    },
+    {
+      "query": "What requirements does EU directive impose on cross-border motor cover?",
+      "latency_ms": 20852,
+      "retrieved_chunk_ids": [
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083"
+      ]
+    },
+    {
+      "query": "Where do Tunisian and EU regulations diverge on coverage exclusions?",
+      "latency_ms": 28231,
+      "retrieved_chunk_ids": [
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0"
+      ]
+    },
+    {
+      "query": "What references does the Tunisian Insurance Code make to EU directives?",
+      "latency_ms": 24627,
+      "retrieved_chunk_ids": [
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0"
+      ]
+    },
+    {
+      "query": "Define the concept of comprehensive coverage in Tunisian law.",
+      "latency_ms": 26743,
+      "retrieved_chunk_ids": [
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0",
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1"
+      ]
+    },
+    {
+      "query": "What policy types apply specifically to Tunisia?",
+      "latency_ms": 36760,
+      "retrieved_chunk_ids": [
+        "ab2b3e30-25ed-5ad5-bb68-dd0f485d8083",
+        "a50dd7ba-92ae-5715-a2ad-ed47011d4917",
+        "d8acd9f5-9737-5981-9dde-750f2c4bdd61",
+        "cb4deb27-cee3-5343-8094-b81050b7cac0",
+        "8d76ac8f-3cef-59ff-be53-af209f34f4f1"
+      ]
+    }
+  ]
+}

@@ -56,16 +56,11 @@ mcp_registry.register_tool("graph_ingest_from_qdrant", ingestor.ingest_all)
 
 async def graph_retrieve_fusion(query: str, top_k: int = 5) -> dict:
     """Perform GraphRAG retrieval fusion and return synthesis."""
-    # Use grag; it needs an embedder - we'll use sentence-transformers here lazily
     try:
-        from sentence_transformers import SentenceTransformer
-        embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-    except Exception:
-        embedder = None
-
-    if embedder is None:
-        return {"error": "embedder not available"}
-
+        from agents.shared.embeddings import get_embedder
+        embedder = get_embedder()
+    except Exception as exc:
+        return {"error": f"embedder not available: {exc}"}
     return grag.retrieve(query, embedder, top_k=top_k)
 
 

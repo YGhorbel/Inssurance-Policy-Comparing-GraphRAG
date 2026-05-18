@@ -17,6 +17,16 @@ models:
 processing:
   chunk_size: 800
   chunk_overlap: 150
+
+embeddings:
+  model_id: "BAAI/bge-m3"
+  dim: 1024
+  sparse_enabled: true
+  max_length: 1024
+  batch_size: 8
+
 qdrant:
   url: "http://localhost:6333"
-  collection: "regulations_chunks"
+  collection: "regulations_chunks_v2"
+  # legacy_collection: retained for rollback only; do not write to it.
+  legacy_collection: "regulations_chunks"

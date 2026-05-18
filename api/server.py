@@ -51,9 +51,8 @@ def graph_retrieve(body: RetrieveRequest):
             res = asyncio.run(coro(body.query, top_k=body.top_k))
             return {"status": "ok", "result": res}
 
-        # Fallback to calling grag directly (needs embedder)
-        from sentence_transformers import SentenceTransformer
-        embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        from agents.shared.embeddings import get_embedder
+        embedder = get_embedder()
         res = grag.retrieve(body.query, embedder, top_k=body.top_k)
         return {"status": "ok", "result": res}
 

@@ -61,5 +61,15 @@ async def process_new_documents():
   return pipeline.process_new_files()
 
 
+async def process_document(object_name: str):
+    """Run the full analyzer pipeline against a single MinIO object.
+
+    Returns the same dict shape as process_file, including the enriched
+    chunks the planner needs to feed into graph_ingest_chunk.
+    """
+    return pipeline.process_file(object_name)
+
+
 mcp_registry.register_tool("analyzer.process_new_files", process_new_documents)
+mcp_registry.register_tool("analyzer.process_document", process_document)
 print("Analyzer pipeline registered.")

@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Tuple
 from qdrant_client import QdrantClient
 from agents.graph_rag.db import Neo4jHandler
+from agents.shared.embeddings import get_embedder
 from agents.shared.fusion import reciprocal_rank_fusion
 from core.llm.client import get_llm_client
 import yaml
@@ -20,17 +21,31 @@ class GraphRAG:
 
         qcfg = cfg.get("qdrant", {})
         self.q_client = QdrantClient(url=qcfg.get("url", "http://localhost:6333"))
-        self.collection = qcfg.get("collection", "regulations_chunks")
+        self.collection = qcfg.get("collection", "regulations_chunks_v2")
 
         self.db = Neo4jHandler(config_path=config_path)
         self.llm = get_llm_client()
 
     def _vector_search(self, query_vector, top_k=5):
         try:
-            hits = self.q_client.search(collection_name=self.collection, query_vector=query_vector, limit=top_k)
+            hits = self.q_client.query_points(
+                collection_name=self.collection,
+                query=query_vector,
+                using="dense",
+                limit=top_k,
+                with_payload=True,
+            ).points
             return hits
         except Exception:
-            return []
+            try:
+                hits = self.q_client.search(
+                    collection_name=self.collection,
+                    query_vector=("dense", query_vector),
+                    limit=top_k,
+                )
+                return hits
+            except Exception:
+                return []
 
     def _expand_graph(self, seed_terms: List[str], depth: int = 1):
         results = []

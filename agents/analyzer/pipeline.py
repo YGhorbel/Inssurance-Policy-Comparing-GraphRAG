@@ -3,11 +3,13 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from collections import Counter
 from typing import List, Optional
 
 import yaml
 
+from agents.shared.embeddings import get_embedder
 from agents.shared.jsonl_logger import log_event
 from core.llm.client import get_llm_client
 from ingestion.pdf_loader import IngestionPipeline
@@ -38,12 +40,11 @@ def _flush_analyzer_totals() -> None:
 
 atexit.register(_flush_analyzer_totals)
 
-from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
 DEFAULT_QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-DEFAULT_COLLECTION = "regulations_chunks"
+DEFAULT_COLLECTION = "regulations_chunks_v2"
 
 
 class AnalyzerPipeline:
@@ -60,33 +61,25 @@ class AnalyzerPipeline:
         self.chunker = DocumentChunker(config_path=config_path)
         self.llm = get_llm_client()
 
-        # Embedding model (HF all-MiniLM-L6-v2)
-        self.embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        self.embedder = get_embedder(config_path=config_path)
         self.qdrant_url = cfg.get("qdrant", {}).get("url", DEFAULT_QDRANT_URL)
         self.q_client = QdrantClient(url=self.qdrant_url)
         self.collection_name = cfg.get("qdrant", {}).get("collection", DEFAULT_COLLECTION)
+        self.sparse_enabled = bool(cfg.get("embeddings", {}).get("sparse_enabled", True))
 
-        # Ensure collection exists (create with appropriate vector size)
-        try:
-            dim = self.embedder.get_sentence_embedding_dimension()
-        except Exception:
-            # Fallback to known dim
-            dim = 384
+        dim = self.embedder.dim
 
-        # Create collection safely: check existing collections first
         try:
             exists = False
             try:
                 collections = self.q_client.get_collections()
                 cols = getattr(collections, 'collections', [])
                 for c in cols:
-                    # c may be namedtuple/object or dict
                     name = getattr(c, 'name', None) or c.get('name') if isinstance(c, dict) else None
                     if name == self.collection_name:
                         exists = True
                         break
             except Exception:
-                # Fallback to try to get collection directly
                 try:
                     _ = self.q_client.get_collection(self.collection_name)
                     exists = True
@@ -94,22 +87,32 @@ class AnalyzerPipeline:
                     exists = False
 
             if not exists:
-                params = qmodels.VectorParams(size=dim, distance=qmodels.Distance.COSINE)
+                vectors_cfg = {"dense": qmodels.VectorParams(size=dim, distance=qmodels.Distance.COSINE)}
+                sparse_cfg = {"sparse": qmodels.SparseVectorParams()} if self.sparse_enabled else None
                 try:
-                    self.q_client.create_collection(collection_name=self.collection_name, vectors_config=params)
+                    self.q_client.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config=vectors_cfg,
+                        sparse_vectors_config=sparse_cfg,
+                    )
                 except Exception:
-                    # If create_collection not available, try recreate_collection as last resort
                     try:
-                        self.q_client.recreate_collection(collection_name=self.collection_name, vectors_config=params)
+                        self.q_client.recreate_collection(
+                            collection_name=self.collection_name,
+                            vectors_config=vectors_cfg,
+                            sparse_vectors_config=sparse_cfg,
+                        )
                     except Exception:
                         pass
         except Exception:
-            # ignore collection creation errors here; operations will fail later if needed
             pass
 
     def _make_id(self, metadata: dict, text: str) -> str:
         base = f"{metadata.get('filename','')}-{metadata.get('chunk_id','')}-{text[:64]}"
-        return hashlib.sha1(base.encode("utf-8")).hexdigest()
+        # Qdrant requires either ints or UUID-formatted strings as point IDs;
+        # a deterministic uuid5 keeps the (filename, chunk_id) -> id mapping
+        # stable across reingests so the rejection JSONL traces remain valid.
+        return str(uuid.uuid5(uuid.NAMESPACE_OID, base))
 
     def _parse_json_from_llm(
         self,
@@ -243,21 +246,22 @@ class AnalyzerPipeline:
 
         return classification
 
-    def _embed(self, text: str):
-        vec = self.embedder.encode(text)
-        return vec
+    def _embed_hybrid(self, text: str) -> dict:
+        """Returns {dense: [float], sparse: {indices, values}?}."""
+        return self.embedder.encode_hybrid([text])[0]
 
-    def _upsert_chunk(self, collection: str, chunk_id: str, vector, payload: dict):
-        # Use qdrant PointStruct
+    def _upsert_chunk(self, collection: str, chunk_id: str, hybrid: dict, payload: dict):
+        vector_struct: dict = {"dense": hybrid["dense"]}
+        if "sparse" in hybrid:
+            vector_struct["sparse"] = qmodels.SparseVector(
+                indices=hybrid["sparse"]["indices"],
+                values=hybrid["sparse"]["values"],
+            )
         try:
-            point = qmodels.PointStruct(id=chunk_id, vector=vector.tolist() if hasattr(vector, 'tolist') else vector, payload=payload)
+            point = qmodels.PointStruct(id=chunk_id, vector=vector_struct, payload=payload)
             self.q_client.upsert(collection_name=collection, points=[point])
-        except Exception:
-            # best-effort: some qdrant versions use different method names
-            try:
-                self.q_client.upsert(collection_name=collection, points=[point])
-            except Exception:
-                pass
+        except Exception as exc:
+            print(f"    > Qdrant upsert error: {str(exc)[:120]}")
 
     def process_file(self, object_name: str):
         docs = self.ingest.download_and_load(object_name)
@@ -280,7 +284,7 @@ class AnalyzerPipeline:
             requirements = self._extract_requirements(text, chunk_id=chunk_id, source_document=source_document)
             classification = self._classify_metadata(text, metadata, chunk_id=chunk_id, source_document=source_document)
 
-            embedding = self._embed(text)
+            hybrid = self._embed_hybrid(text)
 
             # Build enriched chunk structure matching the spec
             enriched_chunk = {
@@ -298,12 +302,11 @@ class AnalyzerPipeline:
                     "page": metadata.get("page", 0),
                     "section": metadata.get("section", "")
                 },
-                "embedding": embedding.tolist() if hasattr(embedding, 'tolist') else embedding,
-                "metadata": metadata  # Keep original metadata for compatibility
+                "embedding": hybrid["dense"],
+                "metadata": metadata,
             }
 
-            # Upsert to Qdrant
-            self._upsert_chunk(self.collection_name, chunk_id, embedding, enriched_chunk)
+            self._upsert_chunk(self.collection_name, chunk_id, hybrid, enriched_chunk)
             enriched_chunks.append(enriched_chunk)
 
         # Mark processed

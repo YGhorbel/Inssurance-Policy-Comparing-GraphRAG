@@ -73,44 +73,41 @@ async def ingest_pending_documents() -> dict:
     for doc in pending:
         print(f"Processing {doc['filename']}...")
         try:
-            # 1. Update Status to processing
             print(f"  - Updating status to processing...")
             await mcp_registry.methods["update_doc_metadata"](doc_id=doc['id'], updates={"status": "processing"})
-            
-            # 2. Download & Read
-            print(f"  - Downloading {doc['filename']}...")
-            file_path = await mcp_registry.methods["get_document_content"](filename=doc['filename'])
-            if not file_path:
-                raise Exception("Download failed")
-            
-            print(f"  - Reading text...")
-            text = await mcp_registry.methods["read_document_text"](file_path=file_path)
-            if not text:
-                raise Exception("Empty or unreadable text")
-                
-            # 3. Chunk
-            print(f"  - Chunking text...")
-            meta = {"filename": doc['filename'], "country": doc.get('country'), "doc_type": doc.get('doc_type')}
-            chunks = await mcp_registry.methods["chunk_document"](text=text, metadata=meta)
-            print(f"    > Generated {len(chunks)} chunks.")
-            
-            # 4. RAG Ingest
-            print(f"  - Ingesting to Qdrant...")
-            await mcp_registry.methods["rag_ingest_chunks"](chunks=chunks)
-            
-            # 5. GraphRAG Ingest (Chunk by Chunk)
+
+            # Run the canonical analyzer pipeline: download + chunk + enrich
+            # (summary, keywords, questions, requirements, classification) +
+            # hybrid BGE-M3 embed + upsert into regulations_chunks_v2. The
+            # previous path (chunk_document + rag_ingest_chunks) skipped the
+            # enrichment and wrote to a different collection; Subtask B
+            # consolidated onto a single analyzer-owned write path.
+            print(f"  - Running analyzer pipeline...")
+            analyzer_result = await mcp_registry.methods["analyzer.process_document"](object_name=doc['filename'])
+            enriched_chunks = analyzer_result.get("enriched_chunks", []) if isinstance(analyzer_result, dict) else []
+            print(f"    > Analyzer indexed {len(enriched_chunks)} enriched chunks.")
+
             print(f"  - Ingesting to Neo4j (GraphRAG)...")
-            # This is slow, so maybe limit or do async? For now, sequential.
-            for i, chunk in enumerate(chunks):
+            for i, chunk in enumerate(enriched_chunks):
                 if i % 10 == 0:
-                   print(f"    > Processing chunk {i+1}/{len(chunks)}...")
-                await mcp_registry.methods["graph_ingest_chunk"](text=chunk['text'], metadata=meta)
-            
-            # 6. Success
+                    print(f"    > Processing chunk {i+1}/{len(enriched_chunks)}...")
+                graph_meta = {
+                    "chunk_id": chunk.get("chunk_id"),
+                    "filename": chunk.get("source", {}).get("document") or doc['filename'],
+                    "country": chunk.get("country") or doc.get('country'),
+                    "policy_type": chunk.get("policy_type"),
+                    "clause_type": chunk.get("clause_type"),
+                    "summary": chunk.get("summary", ""),
+                    "keywords": chunk.get("keywords", []),
+                    "extracted_requirements": chunk.get("extracted_requirements", []),
+                    "source": chunk.get("source", {}),
+                }
+                await mcp_registry.methods["graph_ingest_chunk"](text=chunk.get("text", ""), metadata=graph_meta)
+
             print(f"  - Marking as processed...")
-            await mcp_registry.methods["update_doc_metadata"](doc_id=doc['id'], updates={"status": "processed", "chunks_count": len(chunks)})
+            await mcp_registry.methods["update_doc_metadata"](doc_id=doc['id'], updates={"status": "processed", "chunks_count": len(enriched_chunks)})
             results.append(f"Processed {doc['filename']}")
-            
+
         except Exception as e:
             print(f"Failed {doc['filename']}: {e}")
             await mcp_registry.methods["update_doc_metadata"](doc_id=doc['id'], updates={"status": "error", "error": str(e)})
