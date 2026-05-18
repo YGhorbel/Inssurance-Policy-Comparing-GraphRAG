@@ -76,6 +76,7 @@ test_*.py
 # Evaluation outputs and runtime logs
 evaluation/results/*
 !evaluation/results/.gitkeep
+!evaluation/results/baseline_*.json
 logs/
 
 # Agent session state

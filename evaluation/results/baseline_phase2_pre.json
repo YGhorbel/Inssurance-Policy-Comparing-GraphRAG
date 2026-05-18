@@ -1,0 +1,115 @@
+{
+  "captured_at": "2026-05-18T00:04:06Z",
+  "phase": "phase2_pre",
+  "synthetic_corpus_used": true,
+  "minio_objects": [
+    "Tunisia/smoke_tunisia_auto.pdf",
+    "Tunisia/auto_liability_2024.pdf",
+    "Tunisia/health_obligations_2024.pdf",
+    "France/code_assurances_excerpt.pdf",
+    "EU/directive_motor_insurance.pdf"
+  ],
+  "mcp_tools_registered": 23,
+  "ingest_ms": 57096,
+  "graph_projection_ms": 13,
+  "qdrant": {
+    "regulations": {
+      "points_count": 5,
+      "vectors_count": null
+    },
+    "regulations_chunks": {
+      "points_count": 0,
+      "vectors_count": null
+    }
+  },
+  "neo4j": {
+    "nodes": 61,
+    "rels": 5,
+    "edge_histogram": {
+      "APPLIES_TO": 1,
+      "PART_OF": 1,
+      "REQUIRES": 1,
+      "DEFINES": 1,
+      "CONFLICTS_WITH": 1
+    }
+  },
+  "phase1_metrics": {
+    "cypher_rejections_total": 0,
+    "cypher_rejections_by_reason": {},
+    "analyzer_total_calls": 0,
+    "analyzer_failures": 0,
+    "analyzer_extraction_success_rate": null
+  },
+  "query_trace": [
+    {
+      "query": "What does Tunisian regulation require for motor-vehicle liability cover?",
+      "latency_ms": 8581,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | Empty (`[]`) |\n| **Data structure** | Text-based summaries | Gr",
+      "ok": true
+    },
+    {
+      "query": "List the obligations for health insurance providers in Tunisia.",
+      "latency_ms": 9104,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | **Empty** — `[]` |\n| **Data structure** | Textual summaries | S",
+      "ok": true
+    },
+    {
+      "query": "How does the Tunisian Insurance Code define third-party coverage?",
+      "latency_ms": 8815,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | Empty (`[]`) |\n| **Data structure** | Textual summaries | Struc",
+      "ok": true
+    },
+    {
+      "query": "What are the exclusions under Tunisian auto insurance?",
+      "latency_ms": 7987,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | Empty (`[]`) |\n| **Data structure** | Text-based summaries | Gr",
+      "ok": true
+    },
+    {
+      "query": "Compare auto-insurance obligations between Tunisia and France.",
+      "latency_ms": 10343,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | **Empty** — `[]` |\n| **Data structure** | Textual summaries | E",
+      "ok": true
+    },
+    {
+      "query": "What requirements does EU directive impose on cross-border motor cover?",
+      "latency_ms": 9520,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | **Empty** — `[]` |\n| **Data structure** | Textual summaries | A",
+      "ok": true
+    },
+    {
+      "query": "Where do Tunisian and EU regulations diverge on coverage exclusions?",
+      "latency_ms": 14951,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | Empty (`[]`) |\n| **Data structure** | Textual summaries | Struc",
+      "ok": true
+    },
+    {
+      "query": "What references does the Tunisian Insurance Code make to EU directives?",
+      "latency_ms": 9932,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | Empty (`[]`) |\n| **Data structure** | Text-based summaries | St",
+      "ok": true
+    },
+    {
+      "query": "Define the concept of comprehensive coverage in Tunisian law.",
+      "latency_ms": 8498,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | **Empty** — `[]` |\n| **Data structure** | Textual summaries | A",
+      "ok": true
+    },
+    {
+      "query": "What policy types apply specifically to Tunisia?",
+      "latency_ms": 15975,
+      "retrieved_chunk_ids": [],
+      "synthesis_excerpt": "Based on the provided information, I can offer the following analysis:\n\n## Comparison\n\n| Aspect | Document Summaries | Graph Evidence |\n|--------|-------------------|--------------|\n| **Content** | Present (though not shown in detail) | **Empty** — `[]` |\n| **Data structure** | Textual summaries | A",
+      "ok": true
+    }
+  ]
+}

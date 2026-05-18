@@ -1,7 +1,10 @@
 from core.mcp.handler import mcp_registry
 from core.llm.client import get_llm_client
 import json
-from . import document_analyzer
+try:
+    from . import document_analyzer  # noqa: F401  (dead module; soft-imported, Phase 3 will delete)
+except Exception as _doc_analyzer_exc:
+    print(f"Note: agents.analyzer.document_analyzer skipped ({_doc_analyzer_exc.__class__.__name__}); slated for removal in Phase 3.")
 from .pipeline import AnalyzerPipeline
 
 llm = get_llm_client()

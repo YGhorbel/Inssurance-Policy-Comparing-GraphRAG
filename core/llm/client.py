@@ -78,6 +78,12 @@ class LiquidClient:
             print(f"Generation error: {e}")
             return ""
 
-# Simple singleton access
+# Simple singleton access. Routes to Ollama (local or Cloud) when
+# LLM_PROVIDER=ollama* is set in the environment; otherwise loads the
+# local HF LiquidClient as before.
 def get_llm_client():
+    provider = os.environ.get("LLM_PROVIDER", "").lower()
+    if provider.startswith("ollama"):
+        from core.llm.ollama_client import OllamaClient
+        return OllamaClient()
     return LiquidClient()

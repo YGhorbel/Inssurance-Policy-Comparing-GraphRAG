@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Multi-agent GraphRAG system for analyzing and comparing insurance regulations (focus: Tunisia + international). PDFs in MinIO → chunked/enriched → indexed in Qdrant → projected into a Neo4j knowledge graph → retrieved via vector+graph fusion → summarized by an LLM. Agents communicate over JSON-RPC (MCP) routed by `core.mcp.handler.mcp_registry`.
 
+For the chronological record of revision work (Phase 0 RRF closure, Phase 1 engineering-integrity sweep, known gaps carried forward), see `docs/PHASE_LOG.md`.
+
 ## Running the stack
 
 ```bash
@@ -66,7 +68,11 @@ The repo has one canonical pipeline: the MCP-based multi-agent stack rooted at `
 
 ### LLM client
 
-`core/llm/client.py::LiquidClient` is the canonical singleton — uses HuggingFace `transformers.pipeline`, loaded once per process. Defaults to `LiquidAI/LFM2-2.6B-Exp` per `configs/config.yaml`. (The legacy 4-bit `FHClient` lives in `legacy/models/hf_client.py` for historical reference only.)
+`core/llm/client.py::get_llm_client()` is the singleton entrypoint. It routes by environment:
+- `LLM_PROVIDER=ollama` / `ollama_cloud` → `core/llm/ollama_client.py::OllamaClient` (Ollama-protocol HTTP, local daemon or Ollama Cloud). Configuration via `.env` keys `OLLAMA_BASE_URL`, `OLLAMA_API_KEY`, `OLLAMA_MODEL`. Thinking-model chain-of-thought is always disabled (`think: false`) so reasoning models behave like instruction-following completion models.
+- otherwise → `LiquidClient` (HuggingFace `transformers.pipeline`, in-process LLM weights, default `LiquidAI/LFM2-2.6B-Exp`).
+
+Phase 2+ defaults to Ollama Cloud on this host because local LFM2 inference is CPU-bound and too slow for live iteration. New code must call `get_llm_client()` — never instantiate either client directly. The legacy 4-bit `FHClient` in `legacy/models/hf_client.py` is historical only.
 
 ### Enriched chunk schema (Qdrant payload)
 
