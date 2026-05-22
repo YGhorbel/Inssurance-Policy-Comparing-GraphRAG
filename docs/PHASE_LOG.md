@@ -172,6 +172,193 @@ class iterates a YAML query set, writes JSONL into
 
 ---
 
+## Phase 2 — Multilingual hybrid retrieval (in progress: A + B closed; E.1 next)
+
+**Goal.** Swap the monolingual `all-MiniLM-L6-v2` (384-dim, English-only)
+for BGE-M3's multilingual hybrid dense + sparse encoder (1024-dim +
+lexical token weights), atomically migrate Qdrant to a named-vector
+collection, and route LLM calls through Ollama Cloud so live iteration
+is not CPU-bound on local LFM2.
+
+**Commits (most recent first).**
+
+| Hash | Subtask | Subject |
+|---|---|---|
+| `df23529` | B | BGE-M3 hybrid embedding swap + atomic collection cutover + planner-route fix |
+| `aa156ba` | A | Phase 2 pre-change baseline + Ollama Cloud LLM routing |
+
+### Subtask A — Ollama Cloud routing + pre-change baseline
+
+**Why Ollama Cloud.** Local LFM2 (`LiquidAI/LFM2-2.6B-Exp`, exposed via
+`core/llm/client.py::LiquidClient`) is CPU-bound on this host and too
+slow for the Phase 2 ingest + retrieval iteration loop. Phase 2+
+defaults to Ollama Cloud (`kimi-k2.6:cloud`); the LiquidClient path
+stays in-tree as a fallback so the stack still runs offline.
+
+New module: `core/llm/ollama_client.py::OllamaClient` — process-wide
+singleton, talks to `/api/generate` on `OLLAMA_BASE_URL`, always sends
+`think: false` so reasoning models behave as instruction-following
+completions. (Kimi-K2.6 otherwise puts chain-of-thought in a separate
+`thinking` field and leaves `response` empty, which silently breaks
+every JSON-extracting downstream parser.)
+
+Routing: `core/llm/client.py::get_llm_client()` switches on the
+`LLM_PROVIDER` env var. `ollama*` → `OllamaClient`; otherwise →
+`LiquidClient`. All in-tree call sites already used the singleton; no
+ripple edits.
+
+Environment (loaded from `.env`, which stays gitignored):
+
+| Key | Value |
+|---|---|
+| `LLM_PROVIDER` | `ollama_cloud` |
+| `OLLAMA_BASE_URL` | `https://ollama.com` |
+| `OLLAMA_MODEL` | `kimi-k2.6:cloud` |
+| `OLLAMA_API_KEY` | user-provided |
+
+Baseline harness: `evaluation/baseline.py` generates a tiny synthetic
+PDF corpus, drives a fixed 10-query trace, and snapshots Qdrant point
+counts, Neo4j node/edge counts, and the analyzer-totals JSONL produced
+by Phase 1 Subtask C. Output:
+`evaluation/results/baseline_phase2_pre.json` — captured against the
+pre-Subtask-B collection (`regulations_chunks`, 384-dim) and the
+pre-fix planner that bypassed the analyzer pipeline.
+
+**Baseline findings that motivated Subtask B's scope:**
+
+- Two collections in flight — `regulations` and `regulations_chunks` —
+  with the planner writing one and the analyzer reading the other.
+  Subtask B's atomic cutover to `regulations_chunks_v2` collapses both
+  into a single owner (the analyzer).
+- `analyzer_total_calls = 0` in the baseline log. The planner was
+  writing chunks via `rag_ingest_chunks` without ever invoking
+  `AnalyzerPipeline`, so the enriched-chunk schema (`summary`,
+  `keywords`, `questions`, `extracted_requirements`, classification)
+  was empty for every chunk written by the live path. Subtask B
+  introduces the `analyzer.process_document` MCP tool and the planner
+  delegates to it.
+- All 10 queries returned 0 chunks. Amendment 1's
+  chunk-slot-overlap gate is therefore vacuously satisfied against
+  the pre-B baseline (0/50 denominator); the **post-B** trace is the
+  one E.1 will measure against.
+
+### Subtask B — BGE-M3 hybrid swap + atomic cutover + planner-route fix
+
+**Reference.** Chen et al. (2024), "BGE M3-Embedding: Multi-Lingual,
+Multi-Functionality, Multi-Granularity Text Embeddings Through
+Self-Knowledge Distillation" (arXiv 2402.03216). Dense head =
+1024-dim `[CLS]` (cosine); sparse head = token-id → weight dict
+(BGE-M3's `lexical_weights`). Multi-vector (ColBERT-style) output is
+intentionally **not** enabled — its +5.1 nDCG comes with a "heavy
+cost" and is paired naturally with Late Chunking, both deferred to
+Phase 3.
+
+**New module.** `agents/shared/embeddings.py::BGEM3Embedder` —
+process-wide singleton, lazy-constructed on first `get_embedder()`
+call. FP32 on CPU, FP16 auto-enabled when CUDA is available. Exposes:
+
+- `encode(text)` — single dense vector, SentenceTransformer-shaped
+  shim for legacy call sites that only need a query vector.
+- `encode_hybrid(texts)` — batch, returns
+  `[{dense: [float], sparse: {indices, values}}, ...]` with sparse
+  output already in Qdrant `SparseVector` shape.
+
+**Config (`configs/config.yaml`).**
+
+```yaml
+embeddings:
+  model_id: BAAI/bge-m3
+  dim: 1024
+  sparse_enabled: true
+  max_length: 1024
+  batch_size: 8
+qdrant:
+  collection: regulations_chunks_v2     # new, named-vector, hybrid
+  legacy_collection: regulations_chunks # 384-dim, frozen for parity
+```
+
+**Atomic cutover.** The pre-B collection was 384-dim and singly
+named; the post-B collection is 1024-dim and uses Qdrant's
+named-vector layout (`{"dense": VectorParams(...)}` plus optional
+`{"sparse": SparseVectorParams()}`). A new collection name —
+`regulations_chunks_v2` — keeps the old one untouched until E.4's
+cleanup decision (delete `regulations` + `regulations_chunks` only
+if B+C+D ≥ baseline on Recall@5).
+
+**Touched modules:**
+
+- `agents/analyzer/pipeline.py` — `SentenceTransformer` replaced by
+  `get_embedder()`. New `_embed_hybrid(text)` returns the dense +
+  sparse record. `_make_id` switched from raw SHA1 hex to
+  `uuid.uuid5(uuid.NAMESPACE_OID, base)`: Qdrant rejects raw SHA1
+  with HTTP 400 (`point id must be int or UUID`); a deterministic
+  uuid5 keeps the `(filename, chunk_id)` → id mapping stable across
+  re-ingests so rejection JSONL traces remain valid.
+- `agents/rag/db.py` — `QdrantHandler` rewritten to use
+  `get_embedder()`. Upserts use `qmodels.SparseVector(indices,
+  values)` for the sparse channel; searches use `query_points(...,
+  using="dense", ...)` with a legacy `search(..., query_vector=("dense", v))`
+  fallback for older Qdrant clients.
+- `agents/graph_rag/fusion.py::GraphRAG._vector_search` — same
+  named-vector query path with the same fallback.
+- `agents/analyzer/agent.py` — exposes a new MCP tool
+  `analyzer.process_document(object_name)` returning
+  `{status, file, chunks_indexed, enriched_chunks}`. The dead
+  `document_analyzer` module is soft-imported (Phase 3 removal).
+- `agents/planner/agent.py::ingest_pending_documents` — replaces the
+  former `chunk_document` + `rag_ingest_chunks` inner loop with a
+  single call to `analyzer.process_document(...)` per pending file,
+  then iterates the returned `enriched_chunks` through
+  `graph_ingest_chunk` to build the Neo4j projection.
+
+**Live post-Subtask-B baseline** (`evaluation/results/baseline_phase2_post_B.json`):
+
+| Metric | Pre-B | Post-B |
+|---|---|---|
+| Documents ingested | 5/5 (into `regulations`) | 5/5 (into `regulations_chunks_v2`) |
+| Qdrant points in target collection | 5 | 5 (0% drift) |
+| Neo4j nodes | — | 84 |
+| Neo4j edges | — | 7 |
+| Distinct edge types live | n/a | 7/7 reconciled (REFERENCES + EQUIVALENT_TO appear for the first time) |
+| Query slots filled (10 queries × 5 chunks) | 0/50 | 50/50 |
+| Analyzer total LLM calls | 0 | non-zero across all extractors |
+| Cypher rejections | n/a | 0 |
+
+All four Phase 1 test suites stayed green (`test_rrf_smoke`,
+`test_cypher_validator`, `test_analyzer_success`,
+`test_harness_contract`). Amendment 1's chunk-slot-overlap gate is
+vacuously satisfied against the pre-B baseline (denominator was 0);
+the post-B trace becomes the new reference for E.1+.
+
+**Honest gaps from Phase 1 partially addressed by Subtasks A + B:**
+
+- **Gap #6** (live `/mcp ingest_documents` smoke deferred for lack of
+  installed deps): now satisfied end-to-end against docker-compose
+  Neo4j + Qdrant.
+- **Gap #7** (`ingestion/` + `processing/` namespace migration):
+  partially addressed — `agents/shared/embeddings.py` centralizes
+  embedding access; `ingestion/pdf_loader.py`,
+  `ingestion/minio_loader.py`, `processing/chunker.py` are still
+  imported from their legacy locations by
+  `agents/analyzer/pipeline.py:15-16`; full move under
+  `agents/shared/` deferred to a Phase 2 wrap-up commit.
+
+### Remaining subtasks (approved execution order: E.1 → C → E.2 → D → E.3 → E.4 → F → G → H)
+
+| Subtask | Purpose |
+|---|---|
+| E.1 | MultiHop-RAG regression (B-only). 100 stratified queries pulled from `yixuantt/MultiHop-RAG`; news corpus ingested into a separate `mhrag_eval_v2` collection (no analyzer enrichment — LLM-per-chunk would blow the 30-min budget). Per Amendment 2: all 100 queries must return ≥1 result before any Recall@5 number is computed. |
+| C | SAC chunking (Summary-Augmented). 150-char prefix once per document, generic prompt, cache by `(file_hash, prompt_version)`. |
+| E.2 | B+C run. |
+| D | BGE-reranker-v2-m3 between Qdrant and the LLM; top-20 → top-5; runtime self-disable with per-query JSONL tag. |
+| E.3 | B+C+D run. |
+| E.4 | Combined results table; cleanup decision (delete `regulations` and `regulations_chunks` only if B+C+D ≥ baseline on Recall@5). |
+| F | SSRF guard — `core/mcp/url_guard.py` (HTTPS-only, allowlist, blocklist metadata IPs) + `core/mcp/path_guard.py` for MinIO object names. Logs to `logs/mcp_url_rejections.jsonl`. |
+| G | Prompt-injection guard — `agents/shared/pi_guard.py` (imperative-phrase scan + `<DATA_CONTENT_DO_NOT_EXECUTE>` delimiter wrap in summarizer prompts). Logs to `logs/pi_quarantine.jsonl`. |
+| H | EXPLAIN cardinality guard in `GraphBuilder._execute` (mock-DB unit test + live integration check against docker-compose Neo4j per Amendment 5). |
+
+---
+
 ## Tests (run from repo root)
 
 ```bash
