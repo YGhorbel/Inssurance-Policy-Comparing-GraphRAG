@@ -77,6 +77,8 @@ test_*.py
 evaluation/results/*
 !evaluation/results/.gitkeep
 !evaluation/results/baseline_*.json
+# Evaluation corpora (Git LFS / large external datasets — fetched on demand)
+evaluation/data/
 logs/
 
 # Agent session state
