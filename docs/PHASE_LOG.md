@@ -172,18 +172,22 @@ class iterates a YAML query set, writes JSONL into
 
 ---
 
-## Phase 2 — Multilingual hybrid retrieval (in progress: A + B closed; E.1 next)
+## Phase 2 — Multilingual hybrid retrieval (in progress: A + B + E.1 closed; C next)
 
 **Goal.** Swap the monolingual `all-MiniLM-L6-v2` (384-dim, English-only)
 for BGE-M3's multilingual hybrid dense + sparse encoder (1024-dim +
 lexical token weights), atomically migrate Qdrant to a named-vector
-collection, and route LLM calls through Ollama Cloud so live iteration
-is not CPU-bound on local LFM2.
+collection, route LLM calls through Ollama Cloud so live iteration is
+not CPU-bound on local LFM2, and stand up a defensible external
+retrieval-quality benchmark (MultiHop-RAG) so subsequent subtasks
+(C = SAC chunking, D = BGE-reranker) can be measured against a real
+reference number rather than the 5-document regulations smoke trace.
 
 **Commits (most recent first).**
 
 | Hash | Subtask | Subject |
 |---|---|---|
+| `d1eeb20` | E.1 | MultiHop-RAG regression baseline (B-only) |
 | `df23529` | B | BGE-M3 hybrid embedding swap + atomic collection cutover + planner-route fix |
 | `aa156ba` | A | Phase 2 pre-change baseline + Ollama Cloud LLM routing |
 
@@ -343,11 +347,123 @@ the post-B trace becomes the new reference for E.1+.
   `agents/analyzer/pipeline.py:15-16`; full move under
   `agents/shared/` deferred to a Phase 2 wrap-up commit.
 
-### Remaining subtasks (approved execution order: E.1 → C → E.2 → D → E.3 → E.4 → F → G → H)
+### Subtask E.1 — MultiHop-RAG regression (B-only baseline)
+
+**Why a synthetic corpus benchmark.** The regulations corpus (Tunisia +
+EU/France insurance PDFs) is five documents with no ground-truth
+relevance labels, so it can only support a "does the pipeline run
+end-to-end" smoke test (which Subtask B's post-baseline already
+captures: 50/50 slot fill, 7/7 reconciled edge types live, 0 Cypher
+rejections). It cannot measure retrieval *quality* — and without a
+defensible quality number we cannot show that Subtask C (SAC chunking)
+and Subtask D (BGE-reranker) improve anything. MultiHop-RAG fills that
+gap with public ground truth in a domain (news) close enough to
+regulations text that BGE-M3's behaviour transfers.
+
+**Dataset.** Tang & Yang, *MultiHop-RAG: Benchmarking Retrieval-Augmented
+Generation for Multi-Hop Queries* (arXiv 2401.15391; ODC-BY 1.0 open
+data). Pulled from `yixuantt/MultiHop-RAG` via Git LFS:
+
+| File | Size | Contents |
+|---|---|---|
+| `dataset/MultiHopRAG.json` | 5.17 MB | 2,556 queries across four `question_type`s |
+| `dataset/corpus.json` | 6.79 MB | 609 news articles (`title, url, body, source, published_at, …`) |
+
+Both land at `evaluation/data/multihop_rag/` (gitignored — too large
+and licence-neutral to ship in the repo).
+
+**Stratified subset (committed at `evaluation/queries/multihop_rag_100.yaml`).**
+`random.seed(42)`, 25 queries from each `question_type`. The query types
+exercise different failure modes:
+
+- `inference_query` — answer requires joining evidence across articles
+- `comparison_query` — compare two or more entities across articles
+- `temporal_query` — time-ordering across articles
+- `null_query` — adversarial; answer *not* in the corpus
+
+Relevance is article-level: the YAML's `expected_chunks` field is the
+list of evidence-article URLs from `evidence_list`. The runner returns
+each retrieved chunk's `source_url`, deduped first-occurrence, so
+Recall@k and MRR measure article-level hits (matching the original
+paper's evaluation).
+
+**Corpus ingest.** `evaluation/runners/multihop_rag.py::ingest_corpus`:
+
+| Setting | Value | Why |
+|---|---|---|
+| Chunk size | `target=768 / max=1024` chars | News paragraphs can be 3-5 KB; the hard `MAX_CHARS` bound prevents BGE-M3's sparse head from choking on outsized passages. |
+| Chunk count | 10,381 across 609 articles (avg 17) | |
+| Encoder | BGE-M3, **dense-only** (1024-d cosine) | `_dense_search` queries only `using="dense"`; computing the sparse channel at ingest is pure compute waste here. Flag: `--with-sparse` re-enables it. |
+| Collection | `mhrag_eval_v2` | Separate from the regulations stack so E.2/E.3 can re-run retrieval without re-ingesting. |
+| Chunk-ID scheme | `uuid5(NAMESPACE_OID, "mhrag::{url}::{idx}")` | Deterministic by (url, idx) — same scheme as `regulations_chunks_v2`. |
+
+**Retrieval path.** Per query: BGE-M3 dense encode → Qdrant
+`query_points(using="dense", limit=20)` → walk hits, dedupe by
+`source_url`, keep top-5 URLs.
+
+**Amendment 2 gate** (Phase 2 approval): *before computing any Recall@5
+number, confirm all 100 queries return ≥1 result.* **Result: PASS** —
+100/100 queries returned ≥1 result.
+
+**Results** (canonical baseline committed at
+`evaluation/results/baseline_mhrag_B_only.json`):
+
+| Subset | n | Recall@2 | Recall@5 | MRR | Latency (ms) |
+|---|---|---|---|---|---|
+| `comparison_query` | 25 | 0.520 | **0.727** | 0.843 | 13.4 |
+| `temporal_query` | 25 | 0.493 | **0.753** | 0.748 | 13.4 |
+| `inference_query` | 25 | 0.307 | 0.503 | 0.660 | 13.2 |
+| `null_query` | 25 | 0.000 | 0.000 | 0.000 | 13.0 |
+| **Overall (100)** | 100 | 0.330 | 0.496 | 0.563 | 13.2 |
+| **Answerable-only (75)** | 75 | **0.440** | **0.661** | **0.750** | 13.2 |
+
+The `null_query` bucket is 0.0 by design — those questions have no
+relevant article in the corpus. The **answerable-only Recall@5 = 0.661**
+and **MRR = 0.750** are the numbers E.2 (B+C) and E.3 (B+C+D) must
+beat. Latency is Qdrant-search only (no LLM step in B-only — per-query
+Ollama Cloud calls across 100 multi-hop questions would blow the 30-min
+wall-clock budget per the Phase 2 plan).
+
+**Mid-subtask engineering fixes** (both captured in commit `d1eeb20`):
+
+- **Chunker `MAX_CHARS` enforcement.** First-pass ingest produced
+  5000-char "chunks" from long news paragraphs; BGE-M3's sparse head
+  scales linearly in token count and collapsed throughput from
+  ~350 chunks/min to ~40 chunks/min. Fixed by adding
+  `_hard_split(text, max_chars)` that breaks at sentence boundaries
+  (`. ! ? \n`) so no chunk exceeds 1024 chars (≈ 256 tokens, well
+  inside BGE-M3's 1024-token passage limit).
+- **`ingest_corpus(with_sparse=False)` default.** Discovered the
+  retrieval path uses dense-only, so the BGE-M3 sparse head was being
+  computed at ingest for zero retrieval value. Toggling it off halved
+  per-batch wall time; the runner re-enables sparse on demand with
+  `--with-sparse` if future work uses lexical fusion.
+
+**Honest gaps from E.1 carried forward.**
+
+- **No LLM-answer-quality measurement on MultiHop-RAG.** The paper
+  reports a generation evaluation step (exact-match / faithfulness on
+  the answer string); E.1 measures retrieval only. Wiring the
+  summarizer into the runner is straightforward, but at Ollama Cloud
+  latency the 100-query × N-hops budget exceeds 30 min; that step is
+  deferred to Phase 5 alongside the regulations-corpus answer-quality
+  set.
+- **Chunk-level vs article-level relevance.** The MultiHop-RAG paper
+  evaluates at the article level (does at least one retrieved chunk
+  come from an evidence article?). E.1 matches that convention. A
+  stricter fact-level Recall — "does any retrieved chunk contain the
+  evidence `fact` string?" — would require a separate post-processing
+  pass and is not implemented.
+- **Cold-start latency excluded.** The 13.2 ms mean is steady-state
+  Qdrant search time after BGE-M3 loaded. The first query in a fresh
+  process pays ~5-10 s for BGE-M3 weight load; downstream subtasks
+  that re-launch the runner should not interpret the latency mean as
+  end-to-end.
+
+### Remaining subtasks (approved execution order: C → E.2 → D → E.3 → E.4 → F → G → H)
 
 | Subtask | Purpose |
 |---|---|
-| E.1 | MultiHop-RAG regression (B-only). 100 stratified queries pulled from `yixuantt/MultiHop-RAG`; news corpus ingested into a separate `mhrag_eval_v2` collection (no analyzer enrichment — LLM-per-chunk would blow the 30-min budget). Per Amendment 2: all 100 queries must return ≥1 result before any Recall@5 number is computed. |
 | C | SAC chunking (Summary-Augmented). 150-char prefix once per document, generic prompt, cache by `(file_hash, prompt_version)`. |
 | E.2 | B+C run. |
 | D | BGE-reranker-v2-m3 between Qdrant and the LLM; top-20 → top-5; runtime self-disable with per-query JSONL tag. |
