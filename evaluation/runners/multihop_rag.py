@@ -39,6 +39,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
 from agents.shared.embeddings import get_embedder
+from agents.shared.reranker import get_reranker
 from agents.shared.sac import SAC_PROMPT_VERSION, prefix_chunk, sac_summary
 from evaluation.harness import Query, QueryResult, Runner, load_query_set
 from evaluation.metrics.ranking import recall_at_k, reciprocal_rank
@@ -253,6 +254,7 @@ class MhragRunner(Runner):
         top_k_qdrant: int = 20,
         top_k_eval: int = 5,
         mode_tag: Optional[str] = None,
+        rerank: bool = False,
     ) -> None:
         super().__init__(results_dir=results_dir)
         if qdrant_url is None:
@@ -264,6 +266,8 @@ class MhragRunner(Runner):
         self.top_k_eval = top_k_eval
         if mode_tag:
             self.mode = mode_tag
+        self.rerank_enabled = bool(rerank)
+        self.reranker = get_reranker() if self.rerank_enabled else None
 
     def _dense_search(self, vector: List[float]):
         try:
@@ -281,11 +285,38 @@ class MhragRunner(Runner):
                 limit=self.top_k_qdrant,
             )
 
+    def _rerank_hits(self, query_text: str, hits: list) -> list:
+        """Re-sort Qdrant hits by BGE-reranker-v2-m3 score, or return them
+        unchanged if the reranker is disabled (sticky after a slow first call
+        per Amendment 4)."""
+        if not self.rerank_enabled or self.reranker is None or not hits:
+            return hits
+        passages: List[str] = []
+        for h in hits:
+            payload = getattr(h, "payload", None) or {}
+            passages.append(payload.get("text") or "")
+        scores = self.reranker.rerank(query_text, passages)
+        if scores is None:
+            return hits  # Amendment 4 fallback: keep Qdrant order
+        # Attach reranker scores onto the hit objects so the downstream
+        # dedupe loop reads the new score; sort descending.
+        ranked = list(zip(hits, scores))
+        ranked.sort(key=lambda pair: pair[1], reverse=True)
+        out = []
+        for h, s in ranked:
+            try:
+                h.score = float(s)
+            except Exception:
+                pass
+            out.append(h)
+        return out
+
     def run_one(self, query: Query) -> QueryResult:
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         vec = self.embedder.encode(query.query)
         t0 = time.perf_counter()
         hits = self._dense_search(vec)
+        hits = self._rerank_hits(query.query, hits)
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
         urls_in_order: List[str] = []
@@ -385,6 +416,7 @@ def main() -> int:
     parser.add_argument("--collection", type=str, default=MHRAG_COLLECTION)
     parser.add_argument("--with-sparse", action="store_true", help="Also compute BGE-M3 sparse vectors (default off — retrieval is dense-only)")
     parser.add_argument("--sac", action="store_true", help="Enable Summary-Augmented Chunking (Subtask C) at ingest")
+    parser.add_argument("--rerank", action="store_true", help="Enable BGE-reranker-v2-m3 cross-encoder reranking at query time (Subtask D)")
     parser.add_argument("--mode-tag", type=str, default="", help="Override the runner's mode label in JSONL output (e.g. mhrag_b_plus_c)")
     args = parser.parse_args()
 
@@ -399,8 +431,12 @@ def main() -> int:
 
     results_path = args.metrics or ""
     if args.run:
-        runner = MhragRunner(collection=args.collection, mode_tag=(args.mode_tag or None))
-        print(f"[run] queries={args.queries} mode={runner.mode}")
+        runner = MhragRunner(
+            collection=args.collection,
+            mode_tag=(args.mode_tag or None),
+            rerank=args.rerank,
+        )
+        print(f"[run] queries={args.queries} mode={runner.mode} rerank={args.rerank}")
         results_path = runner.run(args.queries)
         print(f"[run] wrote {results_path}")
 
