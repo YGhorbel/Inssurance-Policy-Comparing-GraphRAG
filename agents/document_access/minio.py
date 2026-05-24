@@ -1,8 +1,11 @@
 from minio import Minio
 from minio.error import S3Error
 import os
+import tempfile
 import yaml
 from urllib.parse import urlparse
+
+from core.mcp.path_guard import PathGuardError, validate_local_path, validate_object_name
 
 class MinioHandler:
     def __init__(self, config_path="configs/config.yaml"):
@@ -86,8 +89,22 @@ class MinioHandler:
             return None
 
     def download_document(self, object_name, local_path):
+        """Guarded MinIO download. Subtask F: rejects traversal and
+        absolute paths in both the storage key and the local destination;
+        the local destination must resolve inside the system tempdir (the
+        only location the canonical pipeline writes to)."""
         try:
-            self.client.fget_object(self.bucket_name, object_name, local_path)
+            validate_object_name(object_name, context="minio.download_document.object_name")
+            safe_local = validate_local_path(
+                local_path,
+                allowed_root=tempfile.gettempdir(),
+                context="minio.download_document.local_path",
+            )
+        except PathGuardError as exc:
+            print(f"Download blocked by path guard: {exc}")
+            return False
+        try:
+            self.client.fget_object(self.bucket_name, object_name, safe_local)
             return True
         except Exception as e:
             print(f"Download Error: {e}")

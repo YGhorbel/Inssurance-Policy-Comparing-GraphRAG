@@ -17,10 +17,15 @@ async def list_available_documents() -> list:
 
 async def get_document_path(filename: str) -> str:
     """
-    Download a specific document to a temp path and return it.
+    Download a specific document to the system tempdir and return the
+    absolute path. Subtask F: writing under tempfile.gettempdir() keeps
+    MinioHandler's path-guard contract satisfied (the local_path must
+    resolve inside the system tempdir).
     """
     import os
-    local_path = f"temp_{os.path.basename(filename)}"
+    import tempfile
+    safe_basename = os.path.basename(filename).replace("/", "_").replace("\\", "_")
+    local_path = os.path.join(tempfile.gettempdir(), f"temp_{safe_basename}")
     if minio.download_document(filename, local_path):
         return local_path
     return ""
