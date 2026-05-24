@@ -9,6 +9,10 @@ AI system to analyze, compare, and propose improvements for insurance policies a
 - Core technologies
 - Quick start
 - Usage examples
+- **Benchmarks** (Phase 2 — MultiHop-RAG retrieval-quality)
+- **Security guards** (SSRF, path-traversal, prompt-injection, EXPLAIN)
+- **Testing** (56 tests across 7 suites)
+- **Documentation**
 - Development notes
 - Contribution
 - License & contact
@@ -42,8 +46,26 @@ This project builds an end-to-end pipeline that:
 - FastAPI: API endpoints for triggers and agent comms
 - Streamlit: admin dashboard and chat interface
 
-Example graph schema:
-(Country)-[:HAS_POLICY]->(PolicyType)-[:COVERS]->(Requirement)<-[:MENTIONS]-(Document)
+Reconciled 7-edge graph schema (Phase 1 Subtask B, enforced by
+`agents/graph_rag/validator.py`):
+
+| # | Edge | Direction | Role |
+|---|---|---|---|
+| 1 | `APPLIES_TO` | directed | scope (Regulation / PolicyType → Country) |
+| 2 | `REQUIRES` | directed | obligation imposition |
+| 3 | `REFERENCES` | directed | citation (Article → Article / Regulation) |
+| 4 | `EQUIVALENT_TO` | **symmetric** | cross-jurisdictional equivalence |
+| 5 | `CONFLICTS_WITH` | **symmetric** | cross-jurisdictional contradiction |
+| 6 | `PART_OF` | directed | structural hierarchy |
+| 7 | `DEFINES` | directed | definitional anchor |
+
+Node label whitelist (9): `Regulation, Article, Obligation, Authority,
+Entity, Concept, PolicyType, Country, Requirement`.
+
+LLM-generated Cypher passes through two layers before execution:
+**structure validator** (taxonomy + destructive-keyword blocklist) and
+**EXPLAIN cardinality guard** (default 100 000-row threshold). See
+[docs/SECURITY.md](docs/SECURITY.md).
 
 ## Data flow
 1. Upload PDFs → MinIO (with metadata)
@@ -83,16 +105,35 @@ Example graph schema:
    - Phase 2: Comparisons, gap analyses, and recommendations
 
 ## Core technologies
-- Storage: MinIO
-- Chunking & parsing: llama_index (SentenceSplitter)
-- LLM reasoning: Ollama (llama3:8b) — summarization, extraction
-- Embeddings: HuggingFace all-MiniLM-L6-v2
-- Vector DB: Qdrant
-- Knowledge graph: Neo4j
-- Orchestration: MCP (JSON-RPC)
-- API: FastAPI
-- UI: Streamlit
-- Deployment: Docker Compose
+- **Storage**: MinIO (object store for raw PDFs)
+- **Chunking**: Chonkie `SemanticChunker` (regulations); paragraph-aware
+  fixed-window `target=768 / max=1024` chars (MultiHop-RAG eval corpus)
+- **Embeddings**: **BGE-M3** (Chen et al. 2024) — multilingual hybrid
+  dense (1024-d, cosine) + sparse (token-id `lexical_weights`) head;
+  swap landed in Phase 2 Subtask B (commit `df23529`). The collection
+  is Qdrant named-vector (`{dense, sparse}`); retrieval is dense-only
+  today, sparse channel ingested for future hybrid fusion.
+- **Reranker** (optional, Phase 2 Subtask D): **BGE-reranker-v2-m3**
+  cross-encoder, top-20 → top-5; Amendment 4 CPU self-disable wired so
+  GPU deploys get the lift and CPU hosts gracefully fall back.
+- **Summary-Augmented Chunking** (Phase 2 Subtask C): one ≤150-char
+  LLM-generated document summary prepended to each chunk at embed time,
+  cached by `(file_hash, prompt_version)`.
+- **LLM**: **Ollama Cloud** (`kimi-k2.6:cloud`) is the default Phase 2+
+  router target (CPU-bound LFM2 is too slow for live iteration); LFM2
+  in-process fallback stays in-tree. Route via `LLM_PROVIDER` env var
+  (`ollama_cloud` → `OllamaClient`, else → `LiquidClient`).
+- **Vector DB**: Qdrant
+- **Knowledge graph**: Neo4j with 7-edge reconciled taxonomy + EXPLAIN
+  cardinality guard
+- **Hybrid fusion**: Reciprocal Rank Fusion (Cormack, Clarke & Buettcher,
+  SIGIR 2009, k=60) over vector hits + graph-driven chunk expansion
+- **Orchestration**: MCP (JSON-RPC) — all agents register tools at
+  import time into a single `mcp_registry` singleton
+- **API**: FastAPI (`/mcp` JSON-RPC adapter at port 8001)
+- **UI**: Streamlit
+- **Deployment**: Docker Compose (MinIO :9000/:9001, Neo4j :7474/:7687,
+  Qdrant :6333)
 
 ## Quick start (high level)
 1. Install Docker & Docker Compose
@@ -130,7 +171,13 @@ pip install -r requirements.txt
 Create a `.env` file or export these vars in your environment. Example `.env` entries:
 
 ```text
-HF_TOKEN=your_hf_token_here
+# Required for the canonical Phase 2+ stack
+LLM_PROVIDER=ollama_cloud
+OLLAMA_BASE_URL=https://ollama.com
+OLLAMA_MODEL=kimi-k2.6:cloud
+OLLAMA_API_KEY=your_ollama_cloud_key_here
+
+# Storage + indexes
 QDRANT_URL=http://localhost:6333
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
@@ -138,7 +185,17 @@ NEO4J_PASSWORD=password
 MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
+
+# Optional
+HF_TOKEN=your_hf_token_here              # higher HF rate limits
+MCP_URL_ALLOWLIST=                        # extra hosts for the SSRF guard
+EXPLAIN_CARDINALITY_THRESHOLD=100000      # Cypher EXPLAIN guard threshold
+RERANK_DISABLE_THRESHOLD_S=15             # Subtask D Amendment 4 budget
+AGENT_LOG_DIR=logs                        # JSONL audit directory
 ```
+
+The `.env` file is gitignored — never commit secrets. Drop in the
+`OLLAMA_API_KEY` and you're set for the canonical Phase 2 pipeline.
 
 - Start the FastAPI server (backend / MCP endpoint)
 
@@ -182,11 +239,103 @@ Notes
 
 Outputs: markdown reports, comparative matrices, citations with provenance.
 
+## Benchmarks
+
+Phase 2 retrieval-quality runs against **MultiHop-RAG** (Tang & Yang,
+arXiv 2401.15391, ODC-BY 1.0). 100 stratified queries from the dataset
+(seed=42, 25 each of `inference / comparison / temporal / null_query`).
+Relevance is article-URL level, matching the original paper.
+**Headline subset** is the 75 answerable queries (`null_query` is a
+negative-control bucket and scores 0.0 by construction).
+
+| Run | Config | Recall@2 | Recall@5 | MRR | Latency |
+|---|---|---|---|---|---|
+| E.1 (B) | BGE-M3 dense | **0.440** | 0.661 | 0.750 | 13.2 ms |
+| E.2 (B+C) | + SAC chunking | 0.418 | **0.672** | **0.816** | 15.3 ms |
+| E.3 (B+C+D) | + BGE-reranker-v2-m3 | 0.418 | 0.672 | 0.816 | 19 ms¹ |
+
+¹ E.3 on CPU: Amendment 4 sticky-disabled the reranker on query 1 at
+41.6 s; 99/100 queries fell back to B+C ordering. Numbers identical to
+E.2 on this host. GPU FP16 is expected to deliver D's quality lift.
+
+Headline takeaway: **SAC delivers +0.066 MRR** (E.2 vs E.1) on the
+answerable subset. Production recommendation is B+C; D is in-tree for
+GPU deploys via `--rerank`. Full per-tag tables, dataset-format notes,
+the cleanup decision, and the honest-gaps caveats live in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md). Machine-readable summaries
+ship at `evaluation/results/baseline_mhrag_{B_only,B_plus_C,B_plus_C_plus_D}.json`.
+
+Reproduce locally:
+
+```bash
+# B-only (E.1)
+.venv/bin/python -m evaluation.runners.multihop_rag --ingest
+.venv/bin/python -m evaluation.runners.multihop_rag --run
+
+# B+C (E.2)
+.venv/bin/python -m evaluation.runners.multihop_rag --ingest --sac \
+    --collection mhrag_eval_v2_sac
+.venv/bin/python -m evaluation.runners.multihop_rag --run \
+    --collection mhrag_eval_v2_sac --mode-tag mhrag_b_plus_c
+
+# B+C+D (E.3) — reranker top-20 → top-5
+.venv/bin/python -m evaluation.runners.multihop_rag --run --rerank \
+    --collection mhrag_eval_v2_sac --mode-tag mhrag_b_plus_c_plus_d
+```
+
+## Security guards
+
+Four runtime guards land on the boundaries where untrusted input flows
+into trusted components. Each rejection writes an append-only JSONL
+audit row under `logs/`.
+
+| Subtask | Module | Threat | JSONL |
+|---|---|---|---|
+| F | `core/mcp/url_guard.py` | SSRF (IMDS, RFC1918, link-local, unknown external hosts) | `mcp_url_rejections.jsonl` |
+| F | `core/mcp/path_guard.py` | MinIO key + local path-traversal | `mcp_path_rejections.jsonl` |
+| G | `agents/shared/pi_guard.py` | Indirect prompt injection from document content | `pi_quarantine.jsonl` |
+| H | `agents/graph_rag/builder.py::_execute` | Runaway Cypher cardinality on validated MERGE/MATCH | `cypher_rejections.jsonl` |
+
+Full design + per-guard API in [docs/SECURITY.md](docs/SECURITY.md).
+
+## Testing
+
+```bash
+for t in test_rrf_smoke test_cypher_validator test_analyzer_success \
+         test_harness_contract test_mcp_guards test_pi_guard \
+         test_explain_guard; do
+  .venv/bin/python -m evaluation.$t
+done
+```
+
+**56 tests across 7 suites, all green** (3 RRF + 7 Cypher validator +
+2 analyzer + 2 harness + 24 MCP guards + 12 PI guard + 6 EXPLAIN guard,
+the last including 2 live Neo4j integration tests that auto-skip when
+the daemon is unreachable — Amendment 5).
+
+## Documentation
+
+| File | Purpose |
+|---|---|
+| [`docs/PHASE_2_COMPLETE.md`](docs/PHASE_2_COMPLETE.md) | Single-page Phase 2 roll-up (commit lineage, headline numbers, security, tests, honest gaps) |
+| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Per-tag retrieval-quality tables (E.1 / E.2 / E.3), reproducibility recipe |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | F / G / H guard internals + JSONL schemas |
+| [`docs/PHASE_LOG.md`](docs/PHASE_LOG.md) | Chronological dev log (Phase 0 / 1 / 2) |
+| [`CLAUDE.md`](CLAUDE.md) | Architecture overview kept fresh for Claude Code sessions |
+
 ## Development notes
-- Keep chunk size tuned to LLM token limits
-- Store chunk metadata (country, doc, policy_type, pub_date) for efficient filtering
-- Use deterministic prompts for requirement extraction to improve graph consistency
-- Add unit tests for ingestion, embedding creation, and graph ingestion
+- Keep chunk size tuned to BGE-M3's 1024-token passage limit
+  (`agents/shared/embeddings.py`); the MultiHop-RAG runner enforces a
+  hard `MAX_CHARS=1024` chunker for that reason.
+- Store chunk metadata (country, doc, policy_type, pub_date,
+  clause_type) for efficient filtering — the enriched-chunk schema in
+  `agents/analyzer/pipeline.py::process_file` is the source of truth.
+- Use deterministic prompts (`agents/graph_rag/prompts.py`,
+  `agents/shared/sac.py`) for extraction to improve graph consistency
+  and SAC cache hit rate.
+- Unit tests live under `evaluation/test_*.py` — 56 today, all stdlib
+  + pytest-free. New features should land with a test in the same
+  style.
 
 ## Contribution
 - Open issues for bugs or enhancements
