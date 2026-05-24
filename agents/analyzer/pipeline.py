@@ -9,11 +9,11 @@ from typing import List, Optional
 
 import yaml
 
+from agents.shared.document_chunker import DocumentChunker
 from agents.shared.embeddings import get_embedder
+from agents.shared.ingestion_pipeline import IngestionPipeline
 from agents.shared.jsonl_logger import log_event
 from core.llm.client import get_llm_client
-from ingestion.pdf_loader import IngestionPipeline
-from processing.chunker import DocumentChunker
 
 _ANALYZER_TOTALS: "Counter[tuple]" = Counter()
 _TOTALS_FLUSHED = False
