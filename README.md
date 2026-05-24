@@ -9,13 +9,10 @@ AI system to analyze, compare, and propose improvements for insurance policies a
 - Core technologies
 - Quick start
 - Usage examples
-- **Benchmarks** (Phase 2 — MultiHop-RAG retrieval-quality)
+- **Benchmarks** (MultiHop-RAG retrieval-quality)
 - **Security guards** (SSRF, path-traversal, prompt-injection, EXPLAIN)
-- **Testing** (56 tests across 7 suites)
-- **Documentation**
 - Development notes
 - Contribution
-- License & contact
 
 ## Project overview
 This project builds an end-to-end pipeline that:
@@ -46,7 +43,7 @@ This project builds an end-to-end pipeline that:
 - FastAPI: API endpoints for triggers and agent comms
 - Streamlit: admin dashboard and chat interface
 
-Reconciled 7-edge graph schema (Phase 1 Subtask B, enforced by
+Reconciled 7-edge graph schema (enforced by
 `agents/graph_rag/validator.py`):
 
 | # | Edge | Direction | Role |
@@ -109,20 +106,22 @@ LLM-generated Cypher passes through two layers before execution:
 - **Chunking**: Chonkie `SemanticChunker` (regulations); paragraph-aware
   fixed-window `target=768 / max=1024` chars (MultiHop-RAG eval corpus)
 - **Embeddings**: **BGE-M3** (Chen et al. 2024) — multilingual hybrid
-  dense (1024-d, cosine) + sparse (token-id `lexical_weights`) head;
-  swap landed in Phase 2 Subtask B (commit `df23529`). The collection
-  is Qdrant named-vector (`{dense, sparse}`); retrieval is dense-only
-  today, sparse channel ingested for future hybrid fusion.
-- **Reranker** (optional, Phase 2 Subtask D): **BGE-reranker-v2-m3**
-  cross-encoder, top-20 → top-5; Amendment 4 CPU self-disable wired so
-  GPU deploys get the lift and CPU hosts gracefully fall back.
-- **Summary-Augmented Chunking** (Phase 2 Subtask C): one ≤150-char
-  LLM-generated document summary prepended to each chunk at embed time,
-  cached by `(file_hash, prompt_version)`.
-- **LLM**: **Ollama Cloud** (`kimi-k2.6:cloud`) is the default Phase 2+
-  router target (CPU-bound LFM2 is too slow for live iteration); LFM2
-  in-process fallback stays in-tree. Route via `LLM_PROVIDER` env var
-  (`ollama_cloud` → `OllamaClient`, else → `LiquidClient`).
+  dense (1024-d, cosine) + sparse (token-id `lexical_weights`) head.
+  The collection is Qdrant named-vector (`{dense, sparse}`); retrieval
+  is dense-only today, sparse channel ingested for future hybrid
+  fusion.
+- **Reranker** (optional): **BGE-reranker-v2-m3** cross-encoder, top-20
+  → top-5; a runtime self-disable falls back to upstream ranking when
+  per-query latency exceeds the CPU budget, so GPU deploys get the
+  lift and CPU hosts gracefully degrade.
+- **Summary-Augmented Chunking**: one ≤150-char LLM-generated document
+  summary prepended to each chunk at embed time, cached by
+  `(file_hash, prompt_version)`.
+- **LLM**: **Ollama Cloud** (`kimi-k2.6:cloud`) is the default router
+  target (CPU-bound local inference is too slow for live iteration);
+  an in-process local fallback stays in-tree. Route via the
+  `LLM_PROVIDER` env var (`ollama_cloud` → `OllamaClient`, else →
+  `LiquidClient`).
 - **Vector DB**: Qdrant
 - **Knowledge graph**: Neo4j with 7-edge reconciled taxonomy + EXPLAIN
   cardinality guard
@@ -190,12 +189,12 @@ MINIO_SECRET_KEY=minioadmin
 HF_TOKEN=your_hf_token_here              # higher HF rate limits
 MCP_URL_ALLOWLIST=                        # extra hosts for the SSRF guard
 EXPLAIN_CARDINALITY_THRESHOLD=100000      # Cypher EXPLAIN guard threshold
-RERANK_DISABLE_THRESHOLD_S=15             # Subtask D Amendment 4 budget
+RERANK_DISABLE_THRESHOLD_S=15             # CPU rerank budget (seconds)
 AGENT_LOG_DIR=logs                        # JSONL audit directory
 ```
 
 The `.env` file is gitignored — never commit secrets. Drop in the
-`OLLAMA_API_KEY` and you're set for the canonical Phase 2 pipeline.
+`OLLAMA_API_KEY` and you're set.
 
 - Start the FastAPI server (backend / MCP endpoint)
 
@@ -241,46 +240,48 @@ Outputs: markdown reports, comparative matrices, citations with provenance.
 
 ## Benchmarks
 
-Phase 2 retrieval-quality runs against **MultiHop-RAG** (Tang & Yang,
+Retrieval-quality runs against **MultiHop-RAG** (Tang & Yang,
 arXiv 2401.15391, ODC-BY 1.0). 100 stratified queries from the dataset
 (seed=42, 25 each of `inference / comparison / temporal / null_query`).
 Relevance is article-URL level, matching the original paper.
 **Headline subset** is the 75 answerable queries (`null_query` is a
 negative-control bucket and scores 0.0 by construction).
 
-| Run | Config | Recall@2 | Recall@5 | MRR | Latency |
-|---|---|---|---|---|---|
-| E.1 (B) | BGE-M3 dense | **0.440** | 0.661 | 0.750 | 13.2 ms |
-| E.2 (B+C) | + SAC chunking | 0.418 | **0.672** | **0.816** | 15.3 ms |
-| E.3 (B+C+D) | + BGE-reranker-v2-m3 | 0.418 | 0.672 | 0.816 | 19 ms¹ |
+| Config | Recall@2 | Recall@5 | MRR | Latency |
+|---|---|---|---|---|
+| BGE-M3 dense | **0.440** | 0.661 | 0.750 | 13.2 ms |
+| + SAC chunking | 0.418 | **0.672** | **0.816** | 15.3 ms |
+| + cross-encoder reranker | 0.418 | 0.672 | 0.816 | 19 ms¹ |
 
-¹ E.3 on CPU: Amendment 4 sticky-disabled the reranker on query 1 at
-41.6 s; 99/100 queries fell back to B+C ordering. Numbers identical to
-E.2 on this host. GPU FP16 is expected to deliver D's quality lift.
+¹ Reranker-pass on CPU: the cross-encoder self-disabled on query 1 at
+41.6 s against the 15 s budget; 99/100 queries fell back to the
+SAC-enabled dense ordering. Numbers identical to the SAC-only row on
+this host. GPU FP16 is expected to deliver the reranker's quality
+lift.
 
-Headline takeaway: **SAC delivers +0.066 MRR** (E.2 vs E.1) on the
-answerable subset. Production recommendation is B+C; D is in-tree for
-GPU deploys via `--rerank`. Full per-tag tables, dataset-format notes,
-the cleanup decision, and the honest-gaps caveats live in
+Headline takeaway: **SAC delivers +0.066 MRR** on the answerable
+subset. Production recommendation is BGE-M3 + SAC; the reranker is
+in-tree for GPU deploys via `--rerank`. Full per-tag tables,
+dataset-format notes, and the honest-gaps caveats live in
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md). Machine-readable summaries
-ship at `evaluation/results/baseline_mhrag_{B_only,B_plus_C,B_plus_C_plus_D}.json`.
+ship at `evaluation/results/baseline_mhrag_*.json`.
 
 Reproduce locally:
 
 ```bash
-# B-only (E.1)
+# Dense baseline
 .venv/bin/python -m evaluation.runners.multihop_rag --ingest
 .venv/bin/python -m evaluation.runners.multihop_rag --run
 
-# B+C (E.2)
+# + SAC chunking
 .venv/bin/python -m evaluation.runners.multihop_rag --ingest --sac \
     --collection mhrag_eval_v2_sac
 .venv/bin/python -m evaluation.runners.multihop_rag --run \
-    --collection mhrag_eval_v2_sac --mode-tag mhrag_b_plus_c
+    --collection mhrag_eval_v2_sac
 
-# B+C+D (E.3) — reranker top-20 → top-5
+# + cross-encoder reranker (top-20 → top-5)
 .venv/bin/python -m evaluation.runners.multihop_rag --run --rerank \
-    --collection mhrag_eval_v2_sac --mode-tag mhrag_b_plus_c_plus_d
+    --collection mhrag_eval_v2_sac
 ```
 
 ## Security guards
@@ -289,39 +290,14 @@ Four runtime guards land on the boundaries where untrusted input flows
 into trusted components. Each rejection writes an append-only JSONL
 audit row under `logs/`.
 
-| Subtask | Module | Threat | JSONL |
-|---|---|---|---|
-| F | `core/mcp/url_guard.py` | SSRF (IMDS, RFC1918, link-local, unknown external hosts) | `mcp_url_rejections.jsonl` |
-| F | `core/mcp/path_guard.py` | MinIO key + local path-traversal | `mcp_path_rejections.jsonl` |
-| G | `agents/shared/pi_guard.py` | Indirect prompt injection from document content | `pi_quarantine.jsonl` |
-| H | `agents/graph_rag/builder.py::_execute` | Runaway Cypher cardinality on validated MERGE/MATCH | `cypher_rejections.jsonl` |
+| Module | Threat | JSONL |
+|---|---|---|
+| `core/mcp/url_guard.py` | SSRF (IMDS, RFC1918, link-local, unknown external hosts) | `mcp_url_rejections.jsonl` |
+| `core/mcp/path_guard.py` | MinIO key + local path-traversal | `mcp_path_rejections.jsonl` |
+| `agents/shared/pi_guard.py` | Indirect prompt injection from document content | `pi_quarantine.jsonl` |
+| `agents/graph_rag/builder.py::_execute` | Runaway Cypher cardinality on validated MERGE/MATCH | `cypher_rejections.jsonl` |
 
 Full design + per-guard API in [docs/SECURITY.md](docs/SECURITY.md).
-
-## Testing
-
-```bash
-for t in test_rrf_smoke test_cypher_validator test_analyzer_success \
-         test_harness_contract test_mcp_guards test_pi_guard \
-         test_explain_guard; do
-  .venv/bin/python -m evaluation.$t
-done
-```
-
-**56 tests across 7 suites, all green** (3 RRF + 7 Cypher validator +
-2 analyzer + 2 harness + 24 MCP guards + 12 PI guard + 6 EXPLAIN guard,
-the last including 2 live Neo4j integration tests that auto-skip when
-the daemon is unreachable — Amendment 5).
-
-## Documentation
-
-| File | Purpose |
-|---|---|
-| [`docs/PHASE_2_COMPLETE.md`](docs/PHASE_2_COMPLETE.md) | Single-page Phase 2 roll-up (commit lineage, headline numbers, security, tests, honest gaps) |
-| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Per-tag retrieval-quality tables (E.1 / E.2 / E.3), reproducibility recipe |
-| [`docs/SECURITY.md`](docs/SECURITY.md) | F / G / H guard internals + JSONL schemas |
-| [`docs/PHASE_LOG.md`](docs/PHASE_LOG.md) | Chronological dev log (Phase 0 / 1 / 2) |
-| [`CLAUDE.md`](CLAUDE.md) | Architecture overview kept fresh for Claude Code sessions |
 
 ## Development notes
 - Keep chunk size tuned to BGE-M3's 1024-token passage limit
@@ -340,8 +316,4 @@ the daemon is unreachable — Amendment 5).
 ## Contribution
 - Open issues for bugs or enhancements
 - Pull requests: run tests and linting before submitting
-
-## License & contact
-- License: Add your license file (e.g., MIT)
-- Contact: maintainers / project owner (add email or repo link)
 
