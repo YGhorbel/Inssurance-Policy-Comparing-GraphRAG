@@ -149,4 +149,61 @@ Run: `.venv/bin/python -m evaluation.test_pi_guard`.
 
 ## Subtask H — EXPLAIN cardinality guard
 
-*Filed in this doc when H lands.*
+`agents/graph_rag/builder.py::GraphBuilder._execute`. Adds a Neo4j
+`EXPLAIN` precheck before executing each LLM-generated Cypher
+statement that the structure-only Phase 1 validator already accepted.
+
+### Why this layers under Phase 1's validator
+
+The Phase 1 schema validator (`agents/graph_rag/validator.py`) catches
+malformed Cypher, off-taxonomy labels and edge types, and destructive
+keywords (`DROP`, `DETACH DELETE`, `CALL apoc.*`). It is *structural*.
+It does not know whether an accepted statement, run against the current
+graph, would produce 5 rows or 50,000,000 — e.g. `MATCH (n)-[r]-(m)
+RETURN n, m` with no label / property predicate is well-formed but a
+quadratic scan on a graph of even modest size.
+
+H closes that gap with a query-plan check.
+
+### How
+
+1. `agents/graph_rag/db.py::Neo4jHandler.explain_estimated_rows(query)` runs
+   `EXPLAIN <query>`, walks `summary.plan` recursively, and returns the
+   maximum `EstimatedRows` value seen across the plan tree (the
+   worst-case operator). Returns `None` if EXPLAIN itself fails or the
+   server doesn't emit `EstimatedRows` (older Neo4j) — callers treat
+   `None` as fail-open.
+2. `GraphBuilder._execute` calls `explain_estimated_rows` on each
+   accepted statement. If the estimate exceeds
+   `EXPLAIN_CARDINALITY_THRESHOLD` (default `100_000`, env-tunable
+   via `EXPLAIN_CARDINALITY_THRESHOLD`), the statement is **rejected
+   pre-execution** and appended to `logs/cypher_rejections.jsonl`:
+
+   ```json
+   {"chunk_id": "...", "source_document": "...",
+    "statement": "<≤500 chars>", "rejection_reason": "explain_cardinality_exceeded",
+    "estimated_rows": 4500000, "threshold": 100000}
+   ```
+
+   The existing `neo4j_execution_failed` reason from Phase 1 still
+   covers runtime-only failures; the two rejection paths share the
+   same JSONL file but use distinct `rejection_reason` codes for clean
+   paper §2.4 aggregation.
+
+### Tests (Amendment 5)
+
+`evaluation/test_explain_guard.py` — 6 tests, all pass:
+
+- **4 mock-DB tests** (run unconditionally): a `_FakeDB` stub returns
+  canned `explain_estimated_rows` values; assertions cover the four
+  cases — low cardinality executes, high cardinality blocks and logs,
+  `None` (EXPLAIN unavailable) fails open, mixed batch blocks only
+  the offender. JSONL writes are sandboxed via direct monkey-patch of
+  `agents.shared.jsonl_logger._LOG_DIR`.
+- **2 live integration tests** (Amendment 5; auto-skip if Neo4j down):
+  real `EXPLAIN MATCH (n) RETURN n LIMIT 1` and real
+  `EXPLAIN MERGE (n:Country …)` against the docker-compose Neo4j; the
+  driver+walker actually produce non-negative ints and the simple
+  MERGE comes back under the default 100k threshold.
+
+Run: `.venv/bin/python -m evaluation.test_explain_guard`.

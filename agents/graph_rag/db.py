@@ -33,6 +33,52 @@ class Neo4jHandler:
             print(f"Query Error: {e}")
             return []
 
+    def explain_estimated_rows(self, query, params=None):
+        """Subtask H + Amendment 5: run EXPLAIN <query>, walk the query
+        plan tree, return the maximum ``EstimatedRows`` reported by any
+        operator.
+
+        Returns:
+          - int: worst-case estimated rows across the plan tree
+          - None: driver unavailable, EXPLAIN failed to compile, or no
+                  EstimatedRows arguments present (older Neo4j versions).
+                  Callers treat None as fail-open (execute the query).
+        """
+        if not self.driver:
+            return None
+        try:
+            with self.driver.session() as session:
+                result = session.run("EXPLAIN " + query, params or {})
+                summary = result.consume()
+                plan = summary.plan or summary.profile
+        except Exception as e:
+            print(f"EXPLAIN error: {str(e)[:120]}")
+            return None
+        if plan is None:
+            return None
+
+        max_rows = 0
+        seen = False
+
+        def _walk(node):
+            nonlocal max_rows, seen
+            args = getattr(node, "arguments", None) or {}
+            for key in ("EstimatedRows", "estimatedRows", "Estimated Rows"):
+                if key in args:
+                    try:
+                        rows = float(args[key])
+                        seen = True
+                        if rows > max_rows:
+                            max_rows = rows
+                    except Exception:
+                        pass
+                    break
+            for child in (getattr(node, "children", None) or []):
+                _walk(child)
+
+        _walk(plan)
+        return int(max_rows) if seen else None
+
     def close(self):
         if self.driver:
             self.driver.close()
