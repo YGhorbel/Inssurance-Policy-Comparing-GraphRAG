@@ -25,7 +25,7 @@ This project builds an end-to-end pipeline that:
 ## Key features
 - PDF ingestion + metadata (country, policy type, date)
 - Chunking, summarization, and requirement extraction
-- Embeddings (HuggingFace) for semantic clause search
+- Embeddings (BGE-M3 multilingual hybrid, 1024-d) for semantic clause search
 - Qdrant vector store + rich metadata filtering
 - Neo4j knowledge graph for relationships and cross-jurisdiction queries
 - Planner/Summarizer agents for orchestration and outputs
@@ -170,7 +170,7 @@ pip install -r requirements.txt
 Create a `.env` file or export these vars in your environment. Example `.env` entries:
 
 ```text
-# Required for the canonical Phase 2+ stack
+# Required for the canonical stack
 LLM_PROVIDER=ollama_cloud
 OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_MODEL=kimi-k2.6:cloud
