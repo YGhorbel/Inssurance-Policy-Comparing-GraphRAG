@@ -22,6 +22,8 @@ This project builds an end-to-end pipeline that:
 - Builds a knowledge graph (Neo4j) for reasoning and comparison
 - Produces human-readable summaries, gap analyses, and recommendations
 
+![End-to-end user flow](docs/assests/user-flow.png)
+
 ## Key features
 - PDF ingestion + metadata (country, policy type, date)
 - Chunking, summarization, and requirement extraction
