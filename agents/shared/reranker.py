@@ -36,7 +36,14 @@ _LOCK = threading.Lock()
 
 
 class BGEReranker:
-    """Cross-encoder reranker wrapping ``FlagEmbedding.FlagReranker``."""
+    """Cross-encoder reranker wrapping ``sentence_transformers.CrossEncoder``.
+
+    Originally used ``FlagEmbedding.FlagReranker`` but that wrapper still
+    calls ``tokenizer.prepare_for_model`` which was removed in transformers
+    5.8+; ``sentence_transformers.CrossEncoder`` uses the modern
+    ``__call__``-based tokenizer API and works against the same
+    ``BAAI/bge-reranker-v2-m3`` weights.
+    """
 
     def __init__(self, model_id: str = DEFAULT_MODEL_ID) -> None:
         try:
@@ -44,11 +51,13 @@ class BGEReranker:
             cuda = bool(torch.cuda.is_available())
         except Exception:
             cuda = False
-        use_fp16 = cuda
 
-        from FlagEmbedding import FlagReranker
-        print(f"Initializing BGEReranker (model={model_id}, fp16={use_fp16}).")
-        self._model = FlagReranker(model_id, use_fp16=use_fp16)
+        from sentence_transformers import CrossEncoder
+        print(f"Initializing BGEReranker (model={model_id}, cuda={cuda}).")
+        kwargs: dict = {"max_length": 512}
+        if cuda:
+            kwargs["device"] = "cuda"
+        self._model = CrossEncoder(model_id, **kwargs)
         self.model_id = model_id
         self._disabled = False
         self._slow_first_query: Optional[str] = None
@@ -71,7 +80,7 @@ class BGEReranker:
             return []
         t0 = time.perf_counter()
         pairs = [[query, p] for p in passages]
-        scores = self._model.compute_score(pairs, normalize=True)
+        scores = self._model.predict(pairs)
         elapsed = time.perf_counter() - t0
 
         if elapsed > RERANK_DISABLE_THRESHOLD_S:
@@ -87,6 +96,8 @@ class BGEReranker:
             })
             return None
 
+        if hasattr(scores, "tolist"):
+            scores = scores.tolist()
         if isinstance(scores, float):
             scores = [scores]
         return [float(s) for s in scores]
