@@ -1,12 +1,9 @@
 # Benchmarks
 
-Phase 2 retrieval-quality benchmark results. The chronological dev log for
-this work lives in [`PHASE_LOG.md`](PHASE_LOG.md); this file is the
-reviewer-friendly "what are the numbers" view.
-
-Machine-readable copies of every result table below ship in
-`evaluation/results/baseline_mhrag_*.json` (whitelisted past the
-`evaluation/results/*` gitignore pattern).
+Retrieval-quality benchmark results — reviewer-friendly "what are the
+numbers" view. Machine-readable copies of every result table below
+ship in `evaluation/results/baseline_mhrag_*.json` (whitelisted past
+the `evaluation/results/*` gitignore pattern).
 
 ## Dataset
 
@@ -43,9 +40,10 @@ row as the headline number.
 | Encoder | BGE-M3 dense head, 1024-d cosine (sparse off — retrieval is dense-only) |
 | Chunk-ID scheme | `uuid5(NAMESPACE_OID, "mhrag::{url}::{idx}")` (deterministic by `(url, idx)`) |
 
-## E.1 — B-only (BGE-M3 hybrid index, dense retrieval)
+## BGE-M3 dense retrieval
 
-Commit: `d1eeb20`. Collection: `mhrag_eval_v2`. Amendment 2 gate: **PASS** (100/100 queries return ≥1 result).
+Collection: `mhrag_eval_v2`. Empty-results gate: **PASS** (100/100
+queries return ≥1 result).
 
 | Subset | n | Recall@2 | Recall@5 | MRR | Latency (ms) |
 |---|---|---|---|---|---|
@@ -58,11 +56,11 @@ Commit: `d1eeb20`. Collection: `mhrag_eval_v2`. Amendment 2 gate: **PASS** (100/
 
 Source: `evaluation/results/baseline_mhrag_B_only.json`.
 
-## E.2 — B+C (BGE-M3 + Summary-Augmented Chunking)
+## With Summary-Augmented Chunking (SAC)
 
-Commit: `604bcb9`. Collection: `mhrag_eval_v2_sac`. SAC summary
-generation: 609/609 articles (0 LLM failures). Cache:
-`data/sac/cache_v1.json`. Amendment 2 gate: **PASS**.
+Collection: `mhrag_eval_v2_sac`. SAC summary generation: 609/609
+articles (0 LLM failures). Cache: `data/sac/cache_v1.json`. Empty-
+results gate: **PASS**.
 
 | Subset | n | Recall@2 | Recall@5 | MRR | Latency (ms) |
 |---|---|---|---|---|---|
@@ -75,9 +73,9 @@ generation: 609/609 articles (0 LLM failures). Cache:
 
 Source: `evaluation/results/baseline_mhrag_B_plus_C.json`.
 
-## E.1 → E.2 delta
+## Delta: SAC vs dense baseline
 
-| Tag | Metric | B (E.1) | B+C (E.2) | Δ |
+| Tag | Metric | Dense | + SAC | Δ |
 |---|---|---|---|---|
 | `comparison_query` | R@2 | 0.520 | 0.440 | **−0.080** |
 | | R@5 | 0.727 | 0.753 | **+0.027** |
@@ -102,7 +100,7 @@ Source: `evaluation/results/baseline_mhrag_B_plus_C.json`.
   surfaces higher; that is exactly what document-level summary prefixes
   are designed to do.
 - **Recall@5 is essentially flat** (+0.011 answerable). SAC does not
-  surface new relevant articles that the B-only baseline missed at
+  surface new relevant articles that the dense baseline missed at
   top-20 — it reranks within the candidate set.
 - **Recall@2 regresses slightly** (−0.022 answerable). Once two chunks
   from the same article share a summary prefix, their embeddings get
@@ -114,15 +112,15 @@ Source: `evaluation/results/baseline_mhrag_B_plus_C.json`.
 
 For the downstream LLM-synthesis step (top-5 fixed window), MRR matters
 more than Recall@2 — the LLM sees the same five candidates either way
-and benefits from better ordering. SAC stays on for E.3.
+and benefits from better ordering. SAC stays on for the reranker pass.
 
-## E.3 — B+C+D (BGE-M3 + SAC + BGE-reranker-v2-m3, Amendment 4 fired)
+## With cross-encoder reranker (BGE-reranker-v2-m3)
 
-Commit: `8f00be4`. Collection: `mhrag_eval_v2_sac` (reuse of E.2's
-collection — reranker operates on retrieved chunks, no re-ingest).
-Amendment 2 gate: **PASS**. Amendment 4 (sticky-disable): **fired on
-query 1** at 41.6 s rerank wall-clock against the 15 s CPU threshold;
-queries 2–100 fell through to the upstream B+C ordering.
+Collection: `mhrag_eval_v2_sac` (reuse of the SAC collection — the
+reranker operates on retrieved chunks, no re-ingest). Empty-results
+gate: **PASS**. Reranker self-disable: **fired on query 1** at 41.6 s
+rerank wall-clock against the 15 s CPU threshold; queries 2–100 fell
+through to the upstream SAC ordering.
 
 | Subset | n | Recall@2 | Recall@5 | MRR | Latency (ms) |
 |---|---|---|---|---|---|
@@ -147,13 +145,13 @@ disable event lives at `logs/reranker_disabled.jsonl`:
  "reason": "first_slow_query_sticky_disable"}
 ```
 
-### Why E.3's numbers match E.2
+### Why the reranker numbers match the SAC pass
 
-99/100 queries ran with the reranker disabled (fallback to B+C), so the
-headline retrieval-quality numbers are bit-identical to E.2. **This is
-the Phase 2 plan's design intent**: Amendment 4 prefers a finished run
-with a sticky-disable trace over an abandoned run, exactly so the paper
-can quantify the CPU-budget hit. To measure D's actual quality
+99/100 queries ran with the reranker disabled (fallback to SAC), so
+the headline retrieval-quality numbers are bit-identical to the SAC
+pass. **This is the design intent**: a finished run with a sticky-
+disable trace beats an abandoned run, exactly so the CPU-budget hit
+can be quantified. To measure the reranker's actual quality
 contribution on this benchmark requires:
 
 - GPU FP16 (BGE-reranker-v2-m3 finishes 20-passage rerank under 1 s
@@ -161,54 +159,52 @@ contribution on this benchmark requires:
 - A smaller reranker (e.g. `BAAI/bge-reranker-base`, ~380 MB) that fits
   the 15 s CPU budget, or
 - Raising `RERANK_DISABLE_THRESHOLD_S` to ≥60 s and paying the ~67 min
-  full-run cost (defeats the Amendment 4 budget, but useful for a
-  paper-appendix audit row).
+  full-run cost (defeats the budget, but useful as an audit row).
 
-Deferred to a future audit; the Subtask D capability is wired and
+Deferred to a future audit; the reranker capability is wired and
 validated end-to-end.
 
-## Combined comparison (E.1 / E.2 / E.3)
+## Combined comparison
 
 Headline subset is **answerable-only (n=75)** — `null_query` is a
 negative-control bucket and mechanically scores 0 on every run.
 
-| Metric | E.1 (B) | E.2 (B+C) | E.3 (B+C+D)¹ | Best |
+| Metric | Dense | + SAC | + Reranker¹ | Best |
 |---|---|---|---|---|
-| Recall@2 | **0.440** | 0.418 | 0.418 | E.1 (B) |
-| Recall@5 | 0.661 | 0.672 | 0.672 | **E.2 (B+C)** |
-| MRR | 0.750 | 0.816 | 0.816 | **E.2 (B+C)** |
-| Mean latency (steady-state) | 13.2 ms | 15.3 ms | ~19 ms² | E.1 |
+| Recall@2 | **0.440** | 0.418 | 0.418 | Dense |
+| Recall@5 | 0.661 | 0.672 | 0.672 | **+ SAC** |
+| MRR | 0.750 | 0.816 | 0.816 | **+ SAC** |
+| Mean latency (steady-state) | 13.2 ms | 15.3 ms | ~19 ms² | Dense |
 
-¹ Headline E.3 numbers are identical to E.2 because Amendment 4
-sticky-disabled the reranker on query 1.
+¹ Headline reranker numbers are identical to + SAC because the
+reranker sticky-disabled on query 1.
 ² 99/100 queries ran without rerank cost.
 
-### Production recommendation (post-E.4)
+### Production recommendation
 
-- **Use B+C** in the canonical pipeline. SAC's MRR lift (+0.066 on
-  the answerable subset) is the biggest win Phase 2 delivers; it's
-  cheap once the SAC cache is warm.
-- **Keep D in-tree** for GPU deploys. The capability is wired, tested
-  end-to-end, and the Amendment 4 self-disable means turning it on by
-  default on a GPU box is safe.
-- **Do not block on Recall@2.** Both C and D push some distractor
-  chunks above the top-2 cutoff (intra-document embedding similarity
-  effect); for the downstream LLM-synthesis step, MRR > Recall@2 since
-  the LLM always sees the same fixed top-5 window.
+- **Use BGE-M3 + SAC** in the canonical pipeline. SAC's MRR lift
+  (+0.066 on the answerable subset) is the biggest retrieval win;
+  it's cheap once the SAC cache is warm.
+- **Keep the reranker in-tree** for GPU deploys. The capability is
+  wired, tested end-to-end, and the self-disable means turning it on
+  by default on a GPU box is safe.
+- **Do not block on Recall@2.** Both SAC and the reranker push some
+  distractor chunks above the top-2 cutoff (intra-document embedding
+  similarity effect); for the downstream LLM-synthesis step,
+  MRR > Recall@2 since the LLM always sees the same fixed top-5
+  window.
 
-## Cleanup decision (E.4)
+## Cleanup decision
 
-Per the Phase 2 plan: *"delete `regulations` and `regulations_chunks`
-only if B+C+D Recall@5 ≥ baseline on Recall@5."* The 5-document
-regulations corpus has no labeled query set, so the Recall@5 condition
-is evaluated on **MultiHop-RAG** as a proxy that BGE-M3 retrieval is
-trustworthy at all. E.2 cleared 0.672 answerable Recall@5; E.1's
-post-B regulations smoke trace cleared 50/50 chunk-slot fill with all
+The 5-document regulations corpus has no labeled query set, so the
+"is BGE-M3 retrieval trustworthy at all" question is evaluated on
+**MultiHop-RAG** as a proxy. + SAC cleared 0.672 answerable Recall@5;
+the regulations smoke trace cleared 50/50 chunk-slot fill with all
 7 reconciled edge types live for the first time. Both bars met.
 
 **Action:** dropped Qdrant collections `regulations` (5 stale points,
-384-dim, pre-Subtask-B) and `regulations_chunks` (0 points, the
-empty intermediate collection from the planner-bypass bug). The
+384-dim, pre-BGE-M3) and `regulations_chunks` (0 points, the empty
+intermediate collection from the old planner-bypass bug). The
 production collection `regulations_chunks_v2` (1024-dim BGE-M3 hybrid)
 is the sole remaining regulations index. `configs/config.yaml`'s
 `qdrant.legacy_collection` key is removed; `agents/graph_rag/qdrant_ingest.py`'s
@@ -217,27 +213,28 @@ dead default fallback is realigned to the v2 collection name.
 ## Reproducing locally
 
 ```bash
-# B-only (E.1)
+# Dense baseline
 .venv/bin/python -m evaluation.runners.multihop_rag --ingest
 .venv/bin/python -m evaluation.runners.multihop_rag --run
 
-# B+C (E.2)
+# + SAC chunking
 .venv/bin/python -m evaluation.runners.multihop_rag --ingest --sac \
     --collection mhrag_eval_v2_sac
 .venv/bin/python -m evaluation.runners.multihop_rag --run \
-    --collection mhrag_eval_v2_sac --mode-tag mhrag_b_plus_c
+    --collection mhrag_eval_v2_sac
 
-# B+C+D (E.3) — reuses E.2's collection
+# + cross-encoder reranker (reuses the SAC collection)
 .venv/bin/python -m evaluation.runners.multihop_rag --run --rerank \
-    --collection mhrag_eval_v2_sac --mode-tag mhrag_b_plus_c_plus_d
-# Raise the threshold to bypass Amendment 4 self-disable (GPU or audit):
+    --collection mhrag_eval_v2_sac
+# Raise the threshold to bypass the CPU self-disable (GPU or audit):
 # RERANK_DISABLE_THRESHOLD_S=600 .venv/bin/python -m evaluation.runners.multihop_rag --run --rerank …
 ```
 
 Pre-reqs: `docker-compose up -d` (MinIO/Neo4j/Qdrant), `.venv` with
 `requirements.txt` installed, `.env` with `LLM_PROVIDER=ollama_cloud`
 + `OLLAMA_API_KEY` set (only the SAC summaries require an LLM —
-B-only is dense-search only). MultiHop-RAG data files: pull once from
+the dense baseline is dense-search only). MultiHop-RAG data files:
+pull once from
 `https://media.githubusercontent.com/media/yixuantt/MultiHop-RAG/main/dataset/{MultiHopRAG.json,corpus.json}`
 into `evaluation/data/multihop_rag/`.
 
@@ -247,9 +244,8 @@ These caveats apply to every row in this file:
 
 1. **No answer-quality evaluation.** All runs measure retrieval only
    (no LLM synthesis step). Running the summarizer on 100 multi-hop
-   questions through Ollama Cloud was budgeted out at the Phase 2 plan
-   stage — per-query latency would blow the 30-min wall-clock budget.
-   Phase 5 adds answer-quality on the regulations corpus.
+   questions through Ollama Cloud was budgeted out — per-query
+   latency would blow the 30-min wall-clock budget.
 2. **Article-level relevance, not fact-level.** A retrieved chunk is
    "relevant" iff its source URL is in the query's `evidence_list`;
    we do not check whether the chunk actually contains the cited
