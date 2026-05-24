@@ -14,7 +14,7 @@ class QdrantToNeo4jIngestor:
 
         qcfg = cfg.get("qdrant", {})
         url = qcfg.get("url", "http://localhost:6333")
-        collection = qcfg.get("collection", "regulations_chunks")
+        collection = qcfg.get("collection", "regulations_chunks_v2")
 
         self.q_client = QdrantClient(url=url)
         self.collection = collection

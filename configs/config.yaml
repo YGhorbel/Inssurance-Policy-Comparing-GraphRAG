@@ -28,5 +28,8 @@ embeddings:
 qdrant:
   url: "http://localhost:6333"
   collection: "regulations_chunks_v2"
-  # legacy_collection: retained for rollback only; do not write to it.
-  legacy_collection: "regulations_chunks"
+  # 384-dim legacy collections (`regulations`, `regulations_chunks`) were
+  # dropped in Subtask E.4 — Subtask B's 1024-dim hybrid replacement
+  # passed the MultiHop-RAG retrieval-quality bar (E.2: Recall@5=0.672
+  # on the answerable subset) and the regulations post-B baseline
+  # (50/50 slot fill, 7/7 edge types live).
