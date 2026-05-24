@@ -39,6 +39,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
 from agents.shared.embeddings import get_embedder
+from agents.shared.sac import SAC_PROMPT_VERSION, prefix_chunk, sac_summary
 from evaluation.harness import Query, QueryResult, Runner, load_query_set
 from evaluation.metrics.ranking import recall_at_k, reciprocal_rank
 
@@ -139,6 +140,7 @@ def ingest_corpus(
     qdrant_url: Optional[str] = None,
     batch: int = 32,
     with_sparse: bool = False,
+    sac: bool = False,
 ) -> dict:
     """Embed and upsert the MultiHop-RAG news corpus into Qdrant.
 
@@ -149,6 +151,14 @@ def ingest_corpus(
     canonical regulations stack keeps sparse on because of the planned
     hybrid-fusion roadmap; for the MultiHop-RAG eval corpus that roadmap
     does not apply.
+
+    ``sac=True`` enables Summary-Augmented Chunking (Phase 2 Subtask C):
+    one ≤150-char summary is generated per article (cached by file_hash
+    + prompt_version under ``data/sac/``) and prepended to each chunk's
+    text at *embed time only*. The Qdrant payload still stores the
+    original ``text`` so downstream consumers don't see the prefix
+    duplicated across every chunk of a document; the per-article
+    summary lands in the payload under ``sac_summary`` for traceability.
     """
     if qdrant_url is None:
         qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
@@ -184,6 +194,7 @@ def ingest_corpus(
         pending_texts.clear()
         pending_meta.clear()
 
+    sac_hits = 0
     for art in articles:
         url = art.get("url") or ""
         if not url:
@@ -194,8 +205,12 @@ def ingest_corpus(
         if not chunks:
             skipped_articles += 1
             continue
+        summary = sac_summary(body) if sac else ""
+        if sac and summary:
+            sac_hits += 1
         for idx, text in enumerate(chunks):
-            pending_texts.append(text)
+            embed_text = prefix_chunk(text, summary) if sac else text
+            pending_texts.append(embed_text)
             pending_meta.append({
                 "chunk_id": _chunk_id_for(url, idx),
                 "source_url": url,
@@ -205,6 +220,8 @@ def ingest_corpus(
                 "category": art.get("category") or "",
                 "chunk_idx": idx,
                 "text": text,
+                "sac_summary": summary if sac else "",
+                "sac_prompt_version": SAC_PROMPT_VERSION if sac else 0,
             })
             if len(pending_texts) >= batch:
                 _flush()
@@ -219,6 +236,9 @@ def ingest_corpus(
         "points_upserted": total_points,
         "qdrant_points_total": getattr(info, "points_count", None),
         "with_sparse": bool(with_sparse) and original_sparse,
+        "sac_enabled": bool(sac),
+        "sac_articles_with_summary": sac_hits,
+        "sac_prompt_version": SAC_PROMPT_VERSION if sac else 0,
     }
 
 
@@ -232,6 +252,7 @@ class MhragRunner(Runner):
         qdrant_url: Optional[str] = None,
         top_k_qdrant: int = 20,
         top_k_eval: int = 5,
+        mode_tag: Optional[str] = None,
     ) -> None:
         super().__init__(results_dir=results_dir)
         if qdrant_url is None:
@@ -241,6 +262,8 @@ class MhragRunner(Runner):
         self.client = QdrantClient(url=qdrant_url)
         self.top_k_qdrant = top_k_qdrant
         self.top_k_eval = top_k_eval
+        if mode_tag:
+            self.mode = mode_tag
 
     def _dense_search(self, vector: List[float]):
         try:
@@ -361,6 +384,8 @@ def main() -> int:
     parser.add_argument("--corpus", type=str, default=CORPUS_PATH)
     parser.add_argument("--collection", type=str, default=MHRAG_COLLECTION)
     parser.add_argument("--with-sparse", action="store_true", help="Also compute BGE-M3 sparse vectors (default off — retrieval is dense-only)")
+    parser.add_argument("--sac", action="store_true", help="Enable Summary-Augmented Chunking (Subtask C) at ingest")
+    parser.add_argument("--mode-tag", type=str, default="", help="Override the runner's mode label in JSONL output (e.g. mhrag_b_plus_c)")
     args = parser.parse_args()
 
     if not (args.ingest or args.run or args.metrics):
@@ -368,13 +393,13 @@ def main() -> int:
         return 2
 
     if args.ingest:
-        print(f"[ingest] corpus={args.corpus} collection={args.collection} with_sparse={args.with_sparse}")
-        result = ingest_corpus(corpus_path=args.corpus, collection=args.collection, with_sparse=args.with_sparse)
+        print(f"[ingest] corpus={args.corpus} collection={args.collection} with_sparse={args.with_sparse} sac={args.sac}")
+        result = ingest_corpus(corpus_path=args.corpus, collection=args.collection, with_sparse=args.with_sparse, sac=args.sac)
         print(json.dumps(result, indent=2))
 
     results_path = args.metrics or ""
     if args.run:
-        runner = MhragRunner(collection=args.collection)
+        runner = MhragRunner(collection=args.collection, mode_tag=(args.mode_tag or None))
         print(f"[run] queries={args.queries} mode={runner.mode}")
         results_path = runner.run(args.queries)
         print(f"[run] wrote {results_path}")
